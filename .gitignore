@@ -1,0 +1,16 @@
+# Datos (no subir microdatos ICFES por confidencialidad y tamaño)
+data/raw/
+data/processed/
+
+# Outputs generados
+outputs/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Sistema
+.DS_Store
+Thumbs.db
