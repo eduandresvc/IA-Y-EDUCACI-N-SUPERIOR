@@ -7,15 +7,15 @@
 
 ## Descripción
 
-Este proyecto implementa el análisis empírico descrito en la investigación:
+Este proyecto implementa el análisis empírico de la investigación:
 análisis descriptivo comparativo (Parte 1) y modelo de regresión lineal múltiple
 por MCO (Parte 2) para estimar la asociación condicional entre el período de
 adopción masiva de IA Generativa y los puntajes en habilidades genéricas de
 la Prueba Saber Pro.
 
-**Muestra:** 9 IES en 6 departamentos (Bogotá D.C., Antioquia, Valle del Cauca,
-Huila, Nariño, Tolima) — programas de Economía, Administración y Contaduría Pública,
-años 2021–2024.
+**Muestra:** Todos los registros nacionales de DataICFES 2021–2024 (sin filtro
+por institución ni programa). Los 33 departamentos de Colombia + Bogotá D.C.,
+con Bogotá como categoría de referencia en el modelo.
 
 ---
 
@@ -24,20 +24,28 @@ años 2021–2024.
 ```
 IA-Y-EDUCACION-SUPERIOR/
 ├── R/
-│   ├── 00_main.R               # Script principal (ejecutar este)
-│   ├── 01_preparar_datos.R     # Carga, filtro y construcción de variables
+│   ├── 00_main.R                  # Script principal (ejecutar este)
+│   ├── 01_preparar_datos.R        # Carga, filtro por año y construcción de variables
 │   ├── 02_analisis_descriptivo.R  # Parte 1: descriptivos y pruebas bivariadas
-│   ├── 03_regresion_ols.R      # Parte 2: modelos MCO (6 × 3 especificaciones)
-│   ├── 04_diagnosticos.R       # Diagnósticos: normalidad, BP, VIF, DW, RESET
-│   ├── 05_visualizaciones.R    # Figuras 1-7
-│   └── utils.R                 # Constantes y funciones auxiliares
+│   ├── 03_regresion_ols.R         # Parte 2: modelos MCO (6 × 3 especificaciones)
+│   ├── 04_diagnosticos.R          # Diagnósticos: normalidad, BP, VIF, DW, RESET
+│   ├── 05_visualizaciones.R       # Figuras 1-7
+│   └── utils.R                    # Constantes y funciones auxiliares
+├── python/
+│   ├── 00_main.ipynb              # Notebook principal Google Colab
+│   ├── 01_preparar_datos.ipynb    # Equivalente Python de 01_preparar_datos.R
+│   ├── 02_analisis_descriptivo.ipynb
+│   ├── 03_regresion_ols.ipynb
+│   ├── 04_diagnosticos.ipynb
+│   ├── 05_visualizaciones.ipynb
+│   └── utils.py                   # Constantes compartidas Python
 ├── data/
 │   ├── raw/        # Colocar aquí los CSV/SAV de DataICFES (no versionado)
 │   └── processed/  # Datos procesados (no versionados)
 ├── outputs/
 │   ├── tablas/     # CSVs con resultados
 │   ├── figuras/    # PNGs de las figuras
-│   └── modelos/    # RDS de los modelos R
+│   └── modelos/    # RDS / PKL de los modelos
 └── README.md
 ```
 
@@ -45,47 +53,47 @@ IA-Y-EDUCACION-SUPERIOR/
 
 ## Cómo ejecutar
 
-### 1. Obtener los datos
+### Versión R
 
-Descargar los microdatos Saber Pro 2021–2024 desde [DataICFES](https://www.icfes.gov.co/data-icfes/)
-y guardarlos en `data/raw/` con estos nombres:
-
-```
-data/raw/saberpro_2021.csv
-data/raw/saberpro_2022.csv
-data/raw/saberpro_2023.csv
-data/raw/saberpro_2024.csv
-```
-
-También se aceptan formatos `.sav` (SPSS) y `.xlsx`.
-
-> **Sin datos reales:** el script detecta la ausencia y genera datos simulados
-> para probar el flujo. Los resultados simulados **no** son válidos para el artículo.
-
-### 2. Ejecutar el análisis completo
-
-Desde R (con el directorio de trabajo en la raíz del proyecto):
+1. Descarga los microdatos Saber Pro 2021–2024 desde [DataICFES](https://www.icfes.gov.co/data-icfes/)
+   y colócalos en `data/raw/` como `saberpro_2021.csv` … `saberpro_2024.csv`
+   (también acepta `.sav` y `.xlsx`).
+2. Desde R, en la raíz del proyecto:
 
 ```r
 source("R/00_main.R")
 ```
 
-O desde terminal:
+### Versión Python / Google Colab
 
-```bash
-Rscript R/00_main.R
-```
+1. Sube la carpeta del proyecto a Google Drive.
+2. Abre `python/00_main.ipynb` en Colab.
+3. Ajusta `RUTA_PROYECTO` a tu ruta en Drive.
+4. Ejecuta todas las celdas en orden.
+
+> Sin datos reales, ambas versiones generan datos **simulados** para probar el flujo.
+> Los resultados simulados no son válidos para el artículo.
 
 ---
 
-## Variables del modelo
+## Variable de interés principal
+
+| Variable | Tipo | Descripción |
+|---|---|---|
+| `periodo_ia` | Dummy (0/1) | 0 = 2021-2022 (pre-IA); 1 = 2023-2024 (adopción masiva IA Gen) |
+
+## Variables geográficas (análisis nacional)
+
+| Variable | Tipo | Descripción |
+|---|---|---|
+| `depto_ies` | Categórica | 33 departamentos + D.C. — Bogotá = referencia |
+| `distancia_bogota_km` | Continua | Km por vía terrestre desde capital del dpto. a Bogotá D.C. |
+
+## Variables de control
 
 | Variable | Tipo | Descripción |
 |---|---|---|
 | `puntaje_saberpro_generico` | Dependiente | Promedio 5 módulos genéricos (0-300) |
-| `periodo_ia` | Dummy (0/1) | 0 = 2021-2022; 1 = 2023-2024 |
-| `d_antioquia`, `d_valle`, `d_huila`, `d_narino`, `d_tolima` | Dummies | Departamento de la IES (ref. Bogotá D.C.) |
-| `distancia_bogota_km` | Continua | Km vía terrestre desde capital del dpto. a Bogotá |
 | `estrato` | Ordinal 1-6 | Estrato socioeconómico |
 | `genero` | Dummy | 0=Femenino, 1=Masculino |
 | `nivel_educ_padre` | Ordinal 1-7 | Nivel educativo del padre |
@@ -99,18 +107,17 @@ Rscript R/00_main.R
 
 ## Especificaciones del modelo
 
-- **Spec 1 (base):** Sin efectos fijos. Errores HC3 + clusterizados por IES.
+- **Spec 1 (base):** `factor(depto_ies)` + `distancia_bogota_km` + controles. Errores HC3 + clusterizados por IES.
 - **Spec 2 (ef_ies):** Efectos fijos por institución.
 - **Spec 3 (ef_mun):** Efectos fijos por tipo de municipio.
 
-Cada especificación se estima para 6 variables dependientes:
-puntaje genérico agregado + 5 módulos individuales = **18 modelos en total**.
+6 variables dependientes × 3 especificaciones = **18 modelos en total**.
 
 ---
 
 ## Diagnósticos implementados
 
-- Normalidad: Shapiro-Wilk (n < 5000) / Kolmogorov-Smirnov (n ≥ 5000)
+- Normalidad: Shapiro-Wilk (n < 5.000) / Kolmogorov-Smirnov (n ≥ 5.000)
 - Homocedasticidad: Breusch-Pagan
 - Multicolinealidad: VIF (umbral > 10)
 - Autocorrelación: Durbin-Watson
@@ -119,29 +126,16 @@ puntaje genérico agregado + 5 módulos individuales = **18 modelos en total**.
 
 ---
 
-## Paquetes R requeridos
-
-```r
-tidyverse, haven, readxl, sandwich, lmtest, car, estimatr,
-fixest, modelsummary, broom, nortest, tseries,
-ggplot2, ggthemes, patchwork, corrplot, viridis, scales,
-knitr, kableExtra, flextable
-```
-
-Se instalan automáticamente al ejecutar `00_main.R`.
-
----
-
 ## Fuente de datos
 
-ICFES (2023a). *DataICFES: repositorio de microdatos del ICFES.*
+ICFES (2023a). *DataICFES: repositorio de microdatos del ICFES.*  
 https://www.icfes.gov.co/data-icfes/
 
 ---
 
-## Limitaciones (design observacional)
+## Limitaciones (diseño observacional)
 
-Los coeficientes estimados son **asociaciones condicionales**, no efectos causales.
-El coeficiente β_IA puede estar sesgado por variables omitidas, confusión temporal
-con la pandemia COVID-19 y ausencia de aleatorización (Wooldridge, 2020;
+Los coeficientes son **asociaciones condicionales**, no efectos causales.
+β_IA puede estar sesgado por variables omitidas, confusión temporal con
+la pandemia COVID-19 y ausencia de aleatorización (Wooldridge, 2020;
 Angrist & Pischke, 2009).
