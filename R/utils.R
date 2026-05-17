@@ -29,38 +29,53 @@ cargar_paquetes <- function(pkgs = paquetes) {
 # Constantes del proyecto
 # -----------------------------------------------------------------------------
 
-# Nombres exactos de las IES de la muestra (confirmar con DataICFES)
-IES_MUESTRA <- c(
-  "UNIVERSIDAD NACIONAL DE COLOMBIA",
-  "UNIVERSIDAD DISTRITAL FRANCISCO JOSE DE CALDAS",
-  "UNIVERSIDAD DE ANTIOQUIA",
-  "UNIVERSIDAD DEL VALLE",
-  "UNIVERSIDAD SURCOLOMBIANA",
-  "UNIVERSIDAD DE NARINO",
-  "UNIVERSIDAD DEL TOLIMA"
-)
-
-# Programas académicos de interés (confirmar con DataICFES)
-PROGRAMAS_MUESTRA <- c(
-  "ECONOMIA",
-  "ADMINISTRACION DE EMPRESAS",
-  "CONTADURIA PUBLICA",
-  "ADMINISTRACION",
-  "CONTADURIA"
-)
+# Análisis a nivel NACIONAL — sin filtro por IES ni programa
+# Los datos corresponden a todos los registros disponibles en DataICFES (2021-2024)
 
 # Años de análisis
 ANOS_PREVIO <- c(2021, 2022)   # periodo_ia = 0
 ANOS_IA     <- c(2023, 2024)   # periodo_ia = 1
 
-# Distancias a Bogotá D.C. por departamento (km por vía terrestre, IGAC/INVIAS)
+# Departamento de referencia en el modelo (categoría base de factor(depto_ies))
+DEPTO_REF <- "BOGOTA"
+
+# Distancias a Bogotá D.C. — todos los 33 departamentos + D.C. (km vía terrestre)
+# Fuente: IGAC / INVIAS. Para dptos. sin acceso terrestre directo se usa
+# distancia aproximada (aérea o fluvial marcada con *).
 DISTANCIAS_BOGOTA <- c(
-  "BOGOTA"    = 0,
-  "ANTIOQUIA" = 415,
-  "VALLE"     = 460,
-  "TOLIMA"    = 210,
-  "HUILA"     = 310,
-  "NARINO"    = 785
+  "BOGOTA"              =    0,   # Bogotá D.C. — referencia
+  "CUNDINAMARCA"        =   50,   # Facatativá ~50 km
+  "BOYACA"              =  188,   # Tunja
+  "TOLIMA"              =  210,   # Ibagué
+  "META"                =  270,   # Villavicencio
+  "QUINDIO"             =  300,   # Armenia
+  "HUILA"               =  310,   # Neiva
+  "CALDAS"              =  320,   # Manizales
+  "RISARALDA"           =  330,   # Pereira
+  "SANTANDER"           =  380,   # Bucaramanga
+  "CASANARE"            =  380,   # Yopal
+  "ANTIOQUIA"           =  415,   # Medellín
+  "VALLE"               =  460,   # Cali
+  "NORTE DE SANTANDER"  =  600,   # Cúcuta
+  "CHOCO"               =  600,   # Quibdó
+  "PUTUMAYO"            =  570,   # Mocoa
+  "GUAVIARE"            =  580,   # San José del Guaviare
+  "CAUCA"               =  590,   # Popayán
+  "CAQUETA"             =  558,   # Florencia
+  "VICHADA"             =  700,   # Puerto Carreño (*aprox.)
+  "NARINO"              =  785,   # Pasto
+  "CORDOBA"             =  800,   # Montería
+  "GUAINIA"             =  900,   # Puerto Inírida (*aprox.)
+  "ARAUCA"              =  900,   # Arauca
+  "CESAR"               =  920,   # Valledupar
+  "SUCRE"               =  950,   # Sincelejo
+  "MAGDALENA"           = 1000,   # Santa Marta
+  "ATLANTICO"           = 1005,   # Barranquilla
+  "BOLIVAR"             = 1050,   # Cartagena
+  "LA GUAJIRA"          = 1100,   # Riohacha
+  "VAUPES"              = 1100,   # Mitú (*aprox. aéreo)
+  "AMAZONAS"            = 1200,   # Leticia (*aprox. aéreo)
+  "SAN ANDRES"          = 2000    # San Andrés (*distancia aérea)
 )
 
 # Módulos genéricos Saber Pro
@@ -186,9 +201,5 @@ ETIQUETAS_VARS <- c(
   "naturaleza_ies"            = "IES privada (= 1)",
   "puntaje_saber11"           = "Puntaje Saber 11",
   "distancia_bogota_km"       = "Distancia a Bogotá (km)",
-  "d_antioquia"               = "Dpto. Antioquia (ref. Bogotá)",
-  "d_valle"                   = "Dpto. Valle del Cauca (ref. Bogotá)",
-  "d_huila"                   = "Dpto. Huila (ref. Bogotá)",
-  "d_narino"                  = "Dpto. Nariño (ref. Bogotá)",
-  "d_tolima"                  = "Dpto. Tolima (ref. Bogotá)"
+  "depto_ies"                 = "Departamento IES (ref. Bogotá D.C.)"
 )

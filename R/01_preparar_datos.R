@@ -98,28 +98,23 @@ mapear_columnas <- function(df) {
 }
 
 # =============================================================================
-# 3. FILTRO DE MUESTRA
+# 3. FILTRO DE MUESTRA — Solo por año (sin filtro de IES ni programa)
 # =============================================================================
 filtrar_muestra <- function(df) {
+  # Análisis nacional: se conservan todos los registros de 2021-2024
+  # sin restricción por institución ni programa académico.
+  anos_validos <- c(ANOS_PREVIO, ANOS_IA)
 
-  # Normalizar texto para comparaciones
   df <- df %>%
     dplyr::mutate(
-      nombre_ies_upper       = toupper(stringr::str_squish(nombre_ies)),
-      programa_upper         = toupper(stringr::str_squish(programa_academico)),
-      departamento_ies_upper = toupper(stringr::str_squish(departamento_ies))
-    )
+      departamento_ies_upper = toupper(stringr::str_squish(
+        dplyr::coalesce(departamento_ies, "")
+      ))
+    ) %>%
+    dplyr::filter(ANIO_APLICACION %in% anos_validos)
 
-  ies_patron     <- paste(toupper(IES_MUESTRA), collapse = "|")
-  programas_patron <- paste(toupper(PROGRAMAS_MUESTRA), collapse = "|")
-  anos_validos   <- c(ANOS_PREVIO, ANOS_IA)
-
-  df %>%
-    dplyr::filter(
-      stringr::str_detect(nombre_ies_upper, ies_patron),
-      stringr::str_detect(programa_upper, programas_patron),
-      ANIO_APLICACION %in% anos_validos
-    )
+  message(sprintf("Registros tras filtro por año (2021-2024): %d", nrow(df)))
+  df
 }
 
 # =============================================================================
@@ -231,32 +226,53 @@ construir_variables <- function(df) {
       )
     ) %>%
 
-    # --- Departamento de la IES ---
+    # --- Departamento de la IES (todos los 33 dptos. + D.C.) ---
     dplyr::mutate(
       depto_ies = dplyr::case_when(
-        stringr::str_detect(departamento_ies_upper, "BOGOT")     ~ "BOGOTA",
-        stringr::str_detect(departamento_ies_upper, "ANTIOQUIA") ~ "ANTIOQUIA",
-        stringr::str_detect(departamento_ies_upper, "VALLE")     ~ "VALLE",
-        stringr::str_detect(departamento_ies_upper, "HUILA")     ~ "HUILA",
-        stringr::str_detect(departamento_ies_upper, "NARI")      ~ "NARINO",
-        stringr::str_detect(departamento_ies_upper, "TOLIMA")    ~ "TOLIMA",
+        stringr::str_detect(departamento_ies_upper, "BOGOT")              ~ "BOGOTA",
+        stringr::str_detect(departamento_ies_upper, "CUNDINAMARCA")       ~ "CUNDINAMARCA",
+        stringr::str_detect(departamento_ies_upper, "ANTIOQUIA")          ~ "ANTIOQUIA",
+        stringr::str_detect(departamento_ies_upper, "VALLE")              ~ "VALLE",
+        stringr::str_detect(departamento_ies_upper, "ATLANTIC")           ~ "ATLANTICO",
+        stringr::str_detect(departamento_ies_upper, "BOL[IÍ]VAR")        ~ "BOLIVAR",
+        stringr::str_detect(departamento_ies_upper, "BOYAC")              ~ "BOYACA",
+        stringr::str_detect(departamento_ies_upper, "CALDAS")             ~ "CALDAS",
+        stringr::str_detect(departamento_ies_upper, "CAQUET")             ~ "CAQUETA",
+        stringr::str_detect(departamento_ies_upper, "CASANARE")           ~ "CASANARE",
+        stringr::str_detect(departamento_ies_upper, "CAUCA")              ~ "CAUCA",
+        stringr::str_detect(departamento_ies_upper, "CESAR")              ~ "CESAR",
+        stringr::str_detect(departamento_ies_upper, "CHOC")               ~ "CHOCO",
+        stringr::str_detect(departamento_ies_upper, "C[OÓ]RDOBA")        ~ "CORDOBA",
+        stringr::str_detect(departamento_ies_upper, "GUAIN[IÍ]A")        ~ "GUAINIA",
+        stringr::str_detect(departamento_ies_upper, "GUAVIARE")           ~ "GUAVIARE",
+        stringr::str_detect(departamento_ies_upper, "HUILA")              ~ "HUILA",
+        stringr::str_detect(departamento_ies_upper, "LA GUAJIRA|GUAJIRA") ~ "LA GUAJIRA",
+        stringr::str_detect(departamento_ies_upper, "MAGDALENA")          ~ "MAGDALENA",
+        stringr::str_detect(departamento_ies_upper, "META")               ~ "META",
+        stringr::str_detect(departamento_ies_upper, "NARI[NÑ]")          ~ "NARINO",
+        stringr::str_detect(departamento_ies_upper, "NORTE DE SANTANDER") ~ "NORTE DE SANTANDER",
+        stringr::str_detect(departamento_ies_upper, "PUTUMAYO")           ~ "PUTUMAYO",
+        stringr::str_detect(departamento_ies_upper, "QUIND[IÍ]O")        ~ "QUINDIO",
+        stringr::str_detect(departamento_ies_upper, "RISARALDA")          ~ "RISARALDA",
+        stringr::str_detect(departamento_ies_upper, "SAN ANDR")           ~ "SAN ANDRES",
+        stringr::str_detect(departamento_ies_upper, "SANTANDER")          ~ "SANTANDER",
+        stringr::str_detect(departamento_ies_upper, "SUCRE")              ~ "SUCRE",
+        stringr::str_detect(departamento_ies_upper, "TOLIMA")             ~ "TOLIMA",
+        stringr::str_detect(departamento_ies_upper, "VAUP[EÉ]S")         ~ "VAUPES",
+        stringr::str_detect(departamento_ies_upper, "VICHADA")            ~ "VICHADA",
+        stringr::str_detect(departamento_ies_upper, "AMAZONAS")           ~ "AMAZONAS",
+        stringr::str_detect(departamento_ies_upper, "ARAUCA")             ~ "ARAUCA",
         TRUE ~ "OTRO"
+      ),
+      # Factor con Bogotá como categoría de referencia
+      depto_ies = forcats::fct_relevel(factor(depto_ies), DEPTO_REF)
+    ) %>%
+
+    # --- Distancia a Bogotá (km) — lookup completo para los 33 departamentos ---
+    dplyr::mutate(
+      distancia_bogota_km = dplyr::recode(
+        as.character(depto_ies), !!!DISTANCIAS_BOGOTA, .default = NA_real_
       )
-    ) %>%
-
-    # --- Dummies departamentales (base = Bogotá D.C.) ---
-    dplyr::mutate(
-      d_antioquia = as.integer(depto_ies == "ANTIOQUIA"),
-      d_valle     = as.integer(depto_ies == "VALLE"),
-      d_huila     = as.integer(depto_ies == "HUILA"),
-      d_narino    = as.integer(depto_ies == "NARINO"),
-      d_tolima    = as.integer(depto_ies == "TOLIMA")
-    ) %>%
-
-    # --- Distancia a Bogotá (km, lookup table) ---
-    dplyr::mutate(
-      distancia_bogota_km = dplyr::recode(depto_ies, !!!DISTANCIAS_BOGOTA,
-                                           .default = NA_real_)
     ) %>%
 
     # --- Puntaje genérico agregado ---
@@ -276,9 +292,7 @@ depurar_datos <- function(df) {
     "periodo_ia", "estrato", "genero", "nivel_educ_padre",
     "estu_trabaja", "estu_cabeza_familia",
     "internet", "area_residencia", "naturaleza_ies",
-    "puntaje_saber11",
-    "d_antioquia", "d_valle", "d_huila", "d_narino", "d_tolima",
-    "distancia_bogota_km"
+    "puntaje_saber11", "distancia_bogota_km"
   )
 
   # Seleccionar sólo las vars disponibles

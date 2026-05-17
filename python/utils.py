@@ -18,35 +18,50 @@ RUTA_PROYECTO = os.environ.get(
 # CONSTANTES DEL PROYECTO
 # =============================================================================
 
-IES_MUESTRA = [
-    "UNIVERSIDAD NACIONAL DE COLOMBIA",
-    "UNIVERSIDAD DISTRITAL FRANCISCO JOSE DE CALDAS",
-    "UNIVERSIDAD DE ANTIOQUIA",
-    "UNIVERSIDAD DEL VALLE",
-    "UNIVERSIDAD SURCOLOMBIANA",
-    "UNIVERSIDAD DE NARINO",
-    "UNIVERSIDAD DEL TOLIMA",
-]
-
-PROGRAMAS_MUESTRA = [
-    "ECONOMIA",
-    "ADMINISTRACION DE EMPRESAS",
-    "CONTADURIA PUBLICA",
-    "ADMINISTRACION",
-    "CONTADURIA",
-]
+# Análisis a nivel NACIONAL — sin filtro por IES ni programa
 
 ANOS_PREVIO = [2021, 2022]   # periodo_ia = 0
 ANOS_IA     = [2023, 2024]   # periodo_ia = 1
 
-# Distancias a Bogotá D.C. por departamento (km vía terrestre, IGAC/INVIAS)
+# Departamento de referencia (categoría base en el modelo)
+DEPTO_REF = "BOGOTA"
+
+# Distancias a Bogotá D.C. — todos los 33 departamentos + D.C.
+# Fuente: IGAC/INVIAS. (*) = distancia aproximada aérea o fluvial.
 DISTANCIAS_BOGOTA = {
-    "BOGOTA":    0,
-    "ANTIOQUIA": 415,
-    "VALLE":     460,
-    "TOLIMA":    210,
-    "HUILA":     310,
-    "NARINO":    785,
+    "BOGOTA":             0,
+    "CUNDINAMARCA":      50,
+    "BOYACA":           188,
+    "TOLIMA":           210,
+    "META":             270,
+    "QUINDIO":          300,
+    "HUILA":            310,
+    "CALDAS":           320,
+    "RISARALDA":        330,
+    "SANTANDER":        380,
+    "CASANARE":         380,
+    "ANTIOQUIA":        415,
+    "VALLE":            460,
+    "CAQUETA":          558,
+    "PUTUMAYO":         570,
+    "GUAVIARE":         580,
+    "CAUCA":            590,
+    "NORTE DE SANTANDER": 600,
+    "CHOCO":            600,
+    "VICHADA":          700,   # *
+    "NARINO":           785,
+    "CORDOBA":          800,
+    "ARAUCA":           900,
+    "GUAINIA":          900,   # *
+    "CESAR":            920,
+    "SUCRE":            950,
+    "MAGDALENA":       1000,
+    "ATLANTICO":       1005,
+    "BOLIVAR":         1050,
+    "LA GUAJIRA":      1100,
+    "VAUPES":          1100,   # *
+    "AMAZONAS":        1200,   # *
+    "SAN ANDRES":      2000,   # * aéreo
 }
 
 MODULOS_GENERICOS = [
@@ -72,7 +87,9 @@ CONTROLES = [
     "puntaje_saber11",
 ]
 
-DUMMIES_DEPTO = ["d_antioquia", "d_valle", "d_huila", "d_narino", "d_tolima"]
+# Las dummies departamentales se crean dinámicamente con pd.get_dummies()
+# o con C(depto_ies) en statsmodels — no se listan manualmente.
+CONTROLES_LISTA = CONTROLES  # alias de compatibilidad
 
 ALPHA = 0.05
 
@@ -95,11 +112,7 @@ ETIQUETAS_VARS = {
     "naturaleza_ies":            "IES privada (= 1)",
     "puntaje_saber11":           "Puntaje Saber 11",
     "distancia_bogota_km":       "Distancia a Bogotá (km)",
-    "d_antioquia":               "Dpto. Antioquia (ref. Bogotá)",
-    "d_valle":                   "Dpto. Valle del Cauca (ref. Bogotá)",
-    "d_huila":                   "Dpto. Huila (ref. Bogotá)",
-    "d_narino":                  "Dpto. Nariño (ref. Bogotá)",
-    "d_tolima":                  "Dpto. Tolima (ref. Bogotá)",
+    "depto_ies":                 "Departamento IES (ref. Bogotá D.C.)",
 }
 
 COLORES_DEPTO = {

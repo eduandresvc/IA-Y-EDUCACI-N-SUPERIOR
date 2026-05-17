@@ -24,24 +24,29 @@ CONTROLES <- c(
   "puntaje_saber11"
 )
 
-# Dummies departamentales (Bogotá = referencia, omitida)
-DUMMIES_DEPTO <- c("d_antioquia", "d_valle", "d_huila", "d_narino", "d_tolima")
+# Análisis NACIONAL: los efectos departamentales se capturan con
+# factor(depto_ies) con Bogotá D.C. como categoría de referencia.
+# Las dummies se generan automáticamente — no se listan manualmente.
 
 #' Construye la fórmula para cada modelo
-#' @param var_dep  Variable dependiente
-#' @param spec     Especificación: "base", "ef_ies", "ef_mun"
-#' @param incluir_dist  Incluir distancia_bogota_km
-#' @param incluir_dummies Incluir dummies departamentales
+#' @param var_dep        Variable dependiente
+#' @param spec           "base" | "ef_ies" | "ef_mun"
+#' @param incluir_depto  TRUE = factor(depto_ies); FALSE = omite departamento
+#' @param incluir_dist   TRUE = distancia_bogota_km continua
 construir_formula <- function(var_dep,
                                spec = c("base", "ef_ies", "ef_mun"),
-                               incluir_dist   = TRUE,
-                               incluir_dummies = TRUE) {
+                               incluir_depto = TRUE,
+                               incluir_dist  = TRUE) {
   spec <- match.arg(spec)
+
+  # Término departamental: variable categórica con Bogotá como referencia
+  termino_depto <- if (incluir_depto) "depto_ies" else NULL
+  termino_dist  <- if (incluir_dist)  "distancia_bogota_km" else NULL
 
   vars_rhs <- c(
     "periodo_ia",
-    if (incluir_dummies) DUMMIES_DEPTO,
-    if (incluir_dist)    "distancia_bogota_km",
+    termino_depto,
+    termino_dist,
     CONTROLES
   )
 
@@ -54,7 +59,6 @@ construir_formula <- function(var_dep,
   if (spec == "base") {
     as.formula(paste(var_dep, "~", paste(vars_rhs, collapse = " + ")))
   } else {
-    # fixest::feols usa sintaxis con |
     as.formula(paste(var_dep, "~", paste(vars_rhs, collapse = " + "), ef))
   }
 }
@@ -187,29 +191,29 @@ extraer_coeficientes <- function(resultado) {
 }
 
 # =============================================================================
-# 4. VERSIONES DEL MODELO PARA COLINEALIDAD DIST ~ DUMMIES
+# 4. VERSIONES DEL MODELO PARA COLINEALIDAD factor(depto_ies) ~ distancia
 # =============================================================================
-# La investigación requiere 3 sub-versiones para analizar la colinealidad:
-#   (a) solo dummies departamentales (sin distancia)
-#   (b) solo distancia_bogota_km (sin dummies)
-#   (c) ambas (con diagnóstico FIV)
+# Dado que cada departamento tiene un único valor de distancia_bogota_km,
+# incluir ambas variables simultáneamente genera colinealidad alta (no perfecta).
+# Se reportan tres versiones para documentar su contribución independiente:
+#   (a) solo_depto:     factor(depto_ies) sin distancia
+#   (b) solo_distancia: distancia_bogota_km sin factor departamental
+#   (c) ambas:          ambas simultáneas, con diagnóstico FIV
 
 estimar_tres_versiones_geograficas <- function(df, var_dep) {
 
-  df_limpio <- df %>% tidyr::drop_na(periodo_ia, dplyr::all_of(
-    intersect(c(CONTROLES, DUMMIES_DEPTO, "distancia_bogota_km"), names(df))
-  ))
+  df_limpio <- df %>% tidyr::drop_na(periodo_ia, depto_ies,
+                                     dplyr::all_of(
+                                       intersect(c(CONTROLES, "distancia_bogota_km"),
+                                                 names(df))))
 
-  base_rhs <- paste(c("periodo_ia", CONTROLES), collapse = " + ")
+  base_rhs  <- paste(c("periodo_ia", CONTROLES), collapse = " + ")
 
   formulas <- list(
-    solo_dummies   = as.formula(paste(var_dep, "~", base_rhs, "+",
-                                       paste(DUMMIES_DEPTO, collapse = " + "))),
-    solo_distancia = as.formula(paste(var_dep, "~", base_rhs,
-                                       "+ distancia_bogota_km")),
-    ambas          = as.formula(paste(var_dep, "~", base_rhs, "+",
-                                       paste(DUMMIES_DEPTO, collapse = " + "),
-                                       "+ distancia_bogota_km"))
+    solo_depto     = as.formula(paste(var_dep, "~", base_rhs, "+ depto_ies")),
+    solo_distancia = as.formula(paste(var_dep, "~", base_rhs, "+ distancia_bogota_km")),
+    ambas          = as.formula(paste(var_dep, "~", base_rhs,
+                                       "+ depto_ies + distancia_bogota_km"))
   )
 
   purrr::imap(formulas, function(f, nombre) {
@@ -234,10 +238,10 @@ construir_tabla4 <- function(lista_modelos) {
   purrr::map_dfr(lista_modelos, function(res) {
     if (is.null(res)) return(NULL)
     extraer_coeficientes(res) %>%
-      dplyr::filter(variable %in% c(
-        "periodo_ia", "distancia_bogota_km",
-        DUMMIES_DEPTO, CONTROLES, "(Intercept)"
-      ))
+      # Conservar periodo_ia, controles, distancia y todos los coef. de depto_ies
+      dplyr::filter(variable %in% c("periodo_ia", "distancia_bogota_km",
+                                     CONTROLES, "(Intercept)") |
+                      stringr::str_starts(variable, "depto_ies"))
   }) %>%
     dplyr::mutate(
       etiqueta = dplyr::recode(variable, !!!ETIQUETAS_VARS, .default = variable),
@@ -292,8 +296,8 @@ regresion_ols <- function(df,
       message(sprintf("  Estimando: %s (%s)...", vd, sp))
 
       f <- tryCatch(
-        construir_formula(vd, spec = sp, incluir_dist = TRUE,
-                           incluir_dummies = TRUE),
+        construir_formula(vd, spec = sp, incluir_depto = TRUE,
+                           incluir_dist = TRUE),
         error = function(e) NULL
       )
       if (is.null(f)) next
