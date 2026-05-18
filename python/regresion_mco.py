@@ -72,10 +72,15 @@ from preparar_datos import (
     RUTA_DEFECTO, en_colab, instalar_dependencias_si_aplica,
     montar_drive_si_aplica,
 )
-instalar_dependencias_si_aplica(("scipy", "statsmodels"))
+instalar_dependencias_si_aplica(("scipy", "statsmodels", "matplotlib", "seaborn"))
 
 import numpy as np
 import pandas as pd
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import seaborn as sns            # noqa: E402
 
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
@@ -385,6 +390,136 @@ def aplicar_correcciones(beta_ia_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================================================================
+# 9.bis FIGURAS DE PUBLICACIÓN
+# =============================================================================
+def _estilo_pub() -> None:
+    """Tema visual coherente con `analisis_descriptivo.py`."""
+    sns.set_theme(style="whitegrid", context="paper", font_scale=1.05)
+    plt.rcParams.update({
+        "figure.facecolor": "white",
+        "axes.facecolor":   "white",
+        "axes.titleweight": "bold",
+        "axes.titlepad":    14,
+        "axes.titlesize":   13,
+        "axes.labelsize":   11,
+        "grid.linestyle":   ":",
+        "grid.alpha":       0.55,
+        "savefig.facecolor": "white",
+    })
+
+
+def figura_forest_beta_ia(beta_ia_df: pd.DataFrame, ruta_out: str) -> None:
+    """Forest plot de β_IA con IC 95% para cada (dependiente × especificación)."""
+    _estilo_pub()
+    etiquetas_dep = {
+        "puntaje_saberpro_generico": "Genérico\n(agregado)",
+        "punt_lectura_critica":      "Lectura\ncrítica",
+        "punt_razona_cuant":         "Razonamiento\ncuantitativo",
+        "punt_competen_ciud":        "Competencias\nciudadanas",
+        "punt_comuni_escrita":       "Comunicación\nescrita",
+        "punt_ingles":               "Inglés",
+    }
+    etiquetas_spec = {"base": "Base", "ef_ies": "EF IES",
+                      "ef_mun": "EF tipo de municipio"}
+    paleta = {"Base": "#3A6FB0", "EF IES": "#4FA869",
+              "EF tipo de municipio": "#E07A3F"}
+
+    d = beta_ia_df.copy()
+    d["dep_label"] = d["dependiente"].map(etiquetas_dep)
+    d["spec_label"] = d["especificacion"].map(etiquetas_spec)
+    d["ci_low"]  = d["beta_IA"] - 1.96 * d["se_IA"]
+    d["ci_high"] = d["beta_IA"] + 1.96 * d["se_IA"]
+
+    deps = list(etiquetas_dep.values())
+    specs = list(etiquetas_spec.values())
+    offset = 0.26
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+    for i, spec in enumerate(specs):
+        sub = (d[d["spec_label"] == spec]
+               .set_index("dep_label").reindex(deps))
+        y = np.arange(len(deps)) + (i - 1) * offset
+        ax.errorbar(
+            sub["beta_IA"].values, y,
+            xerr=1.96 * sub["se_IA"].values,
+            fmt="o", markersize=8, capsize=4,
+            color=paleta[spec], ecolor=paleta[spec],
+            alpha=0.9, linewidth=1.8, label=spec,
+        )
+
+    ax.axvline(0, color="#cc3a3a", linewidth=1.0,
+               linestyle="--", alpha=0.55, zorder=0)
+    ax.set_yticks(np.arange(len(deps)))
+    ax.set_yticklabels(deps, fontsize=10)
+    ax.invert_yaxis()
+    ax.set_xlabel("Coeficiente β_IA (puntos Saber Pro)  —  IC 95%")
+    ax.set_title("Asociación condicional del período de IA Gen con el puntaje Saber Pro")
+    ax.legend(title="Especificación", loc="best")
+    ax.grid(True, axis="x", linestyle=":", alpha=0.55)
+
+    fig.text(0.995, 0.005,
+             "Errores estándar clusterizados por IES.  "
+             "Fuente: DataICFES (2021-2024). Elaboración propia.",
+             ha="right", va="bottom", fontsize=8.2,
+             style="italic", color="#666")
+    fig.tight_layout()
+    fig.savefig(ruta_out, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
+def figura_coeficientes_departamento(
+    tabla4_df: pd.DataFrame, ruta_out: str,
+) -> None:
+    """Lollipop: contrastes de departamento vs Bogotá (Spec base, agregado)."""
+    _estilo_pub()
+    # Import perezoso para evitar referencia circular.
+    from preparar_datos import DEPARTAMENTOS
+
+    sub = tabla4_df[
+        (tabla4_df["dependiente"] == "puntaje_saberpro_generico")
+        & (tabla4_df["especificacion"] == "base")
+        & (tabla4_df["termino"].astype(str).str.contains("departamento"))
+    ].copy()
+    sub["cod"] = (
+        sub["termino"].astype(str)
+        .str.extract(r"\[T\.(\d+)\]")[0]
+        .astype(float)
+    )
+    sub = sub.dropna(subset=["cod"]).copy()
+    cod_a_nombre = {c: n.title() for n, (c, _) in DEPARTAMENTOS.items()}
+    sub["depto"] = sub["cod"].astype(int).map(cod_a_nombre)
+    sub["ci_low"]  = sub["coef"] - 1.96 * sub["error_est"]
+    sub["ci_high"] = sub["coef"] + 1.96 * sub["error_est"]
+    sub["sig"] = sub["p_valor"] < 0.05
+    sub = sub.sort_values("coef")
+
+    fig, ax = plt.subplots(figsize=(9, max(8, 0.30 * len(sub))))
+    for _, r in sub.iterrows():
+        color = "#3A6FB0" if r["coef"] >= 0 else "#E07A3F"
+        alpha_pt = 1.0 if r["sig"] else 0.45
+        ax.hlines(r["depto"], r["ci_low"], r["ci_high"],
+                  color=color, alpha=alpha_pt * 0.55, linewidth=2)
+        ax.scatter(r["coef"], r["depto"], color=color,
+                   s=85 if r["sig"] else 50, alpha=alpha_pt,
+                   edgecolor="white", linewidth=1.1, zorder=10)
+
+    ax.axvline(0, color="black", linewidth=0.9,
+               linestyle="-", alpha=0.55, zorder=0)
+    ax.set_xlabel("Coeficiente vs Bogotá D.C. (puntos Saber Pro)")
+    ax.set_title("Brechas departamentales condicionales en el puntaje genérico\n"
+                 "Modelo base — referencia: Bogotá D.C.")
+    ax.grid(True, axis="x", linestyle=":", alpha=0.55)
+    fig.text(0.995, 0.005,
+             "Puntos llenos = significativos al 5%. Líneas = IC 95%. "
+             "Errores clusterizados por IES.",
+             ha="right", va="bottom", fontsize=8.2,
+             style="italic", color="#666")
+    fig.tight_layout()
+    fig.savefig(ruta_out, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
+# =============================================================================
 # 10. ORQUESTADOR PRINCIPAL
 # =============================================================================
 def ejecutar_regresion(
@@ -401,8 +536,10 @@ def ejecutar_regresion(
         ruta_proyecto = RUTA_DEFECTO
     df = cargar_y_preparar(ruta_proyecto)
 
-    dir_tablas = os.path.join(ruta_proyecto, "procesados", "resultados")
+    dir_tablas  = os.path.join(ruta_proyecto, "procesados", "resultados")
+    dir_figuras = os.path.join(ruta_proyecto, "procesados", "figuras")
     os.makedirs(dir_tablas, exist_ok=True)
+    os.makedirs(dir_figuras, exist_ok=True)
 
     # 18 modelos
     tabla4, diag, beta_ia = estimar_18_modelos(df)
@@ -411,7 +548,7 @@ def ejecutar_regresion(
     # Triángulo de colinealidad geográfica (sólo para el agregado).
     colinealidad = colinealidad_geografica(df)
 
-    # Persistencia
+    # Persistencia de tablas
     tabla4.to_csv(os.path.join(dir_tablas, "tabla4_coeficientes.csv"),
                   index=False, encoding="utf-8-sig")
     diag.to_csv(os.path.join(dir_tablas, "diagnosticos.csv"),
@@ -421,6 +558,17 @@ def ejecutar_regresion(
     colinealidad.to_csv(os.path.join(dir_tablas, "colinealidad_geografica.csv"),
                         index=False, encoding="utf-8-sig")
     _registrar(f"  Tablas guardadas en {dir_tablas}.")
+
+    # Figuras de la regresión
+    figura_forest_beta_ia(
+        beta_ia_corr,
+        os.path.join(dir_figuras, "fig_07_forest_beta_ia.png"),
+    )
+    figura_coeficientes_departamento(
+        tabla4,
+        os.path.join(dir_figuras, "fig_08_coef_departamento.png"),
+    )
+    _registrar("  Dos figuras de la regresión guardadas.")
     _registrar("== FIN REGRESIÓN MCO ==")
     return {
         "tabla4":        tabla4,
