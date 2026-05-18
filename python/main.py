@@ -25,22 +25,29 @@ Uso desde la línea de comandos:
 from __future__ import annotations
 
 import argparse
-from typing import Iterable
+from typing import Iterable, Optional
 
-from preparar_datos import ejecutar_pipeline, ANIOS, _registrar
+from preparar_datos import (
+    ejecutar_pipeline, ANIOS, _registrar,
+    RUTA_DEFECTO, setup_colab,
+)
 from analisis_descriptivo import ejecutar_analisis_descriptivo
 from regresion_mco import ejecutar_regresion
 
 
 def ejecutar_todo(
-    ruta_proyecto: str,
+    ruta_proyecto: Optional[str] = None,
     anios: Iterable[int] = ANIOS,
     correr_preparar: bool = True,
     correr_descriptivo: bool = True,
     correr_regresion: bool = True,
 ) -> None:
-    """Ejecuta los tres módulos del proyecto según las banderas."""
+    """Ejecuta los tres módulos según las banderas. En Colab, `ruta=None`
+    monta Drive y usa `Mi unidad/IA_EDUCACION_SUPERIOR` automáticamente."""
     _registrar("===== PIPELINE COMPLETO DE LA INVESTIGACIÓN =====")
+    if ruta_proyecto is None:
+        setup_colab()
+        ruta_proyecto = RUTA_DEFECTO
     if correr_preparar:
         ejecutar_pipeline(ruta_proyecto=ruta_proyecto, anios=anios)
     if correr_descriptivo:
@@ -54,8 +61,9 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Orquestador completo (preparación + descriptivo + regresión).",
     )
-    p.add_argument("--ruta", "-r", required=True,
-                   help="Carpeta del proyecto con los `.txt` de DataICFES.")
+    p.add_argument("--ruta", "-r", default=None,
+                   help="Carpeta del proyecto con los `.txt` de DataICFES. "
+                        "Omitir en Colab para usar `Mi unidad/IA_EDUCACION_SUPERIOR`.")
     p.add_argument("--anios", "-a", nargs="+", type=int, default=ANIOS,
                    help="Años a procesar.")
     p.add_argument("--solo", choices=["preparar", "descriptivo", "regresion"],

@@ -33,7 +33,17 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+# Bootstrap perezoso: si estamos en Colab y faltan scipy/matplotlib,
+# se instalan antes de importarlos. En entornos locales se asume que el
+# usuario ya los tiene; en Colab estos paquetes vienen preinstalados.
+from preparar_datos import (
+    MODULOS_GENERICOS, _registrar, ANIOS_PREVIO, ANIOS_IA,
+    RUTA_DEFECTO, en_colab, instalar_dependencias_si_aplica,
+    montar_drive_si_aplica,
+)
+instalar_dependencias_si_aplica(("scipy", "matplotlib", "seaborn"))
 
 import numpy as np
 import pandas as pd
@@ -41,11 +51,38 @@ from scipy import stats
 
 import matplotlib
 matplotlib.use("Agg")              # backend sin GUI (válido en servidores).
-import matplotlib.pyplot as plt    # noqa: E402  (import después de use)
+import matplotlib.pyplot as plt    # noqa: E402
+import seaborn as sns              # noqa: E402
 
-from preparar_datos import (
-    MODULOS_GENERICOS, _registrar, ANIOS_PREVIO, ANIOS_IA,
-)
+# Paleta y estilo global de las figuras (publicación, fondo blanco limpio).
+PALETA_COHORTES: Dict[str, str] = {
+    "2021-2022 (pre-IA)":   "#3A6FB0",  # azul sobrio
+    "2023-2024 (IA Gen)":   "#E07A3F",  # naranja cálido
+}
+NOTA_FUENTE: str = "Fuente: DataICFES (2021-2024). Elaboración propia."
+
+
+def _aplicar_estilo() -> None:
+    """Aplica un tema global coherente para las figuras."""
+    sns.set_theme(style="whitegrid", context="paper", font_scale=1.1)
+    plt.rcParams.update({
+        "figure.facecolor": "white",
+        "axes.facecolor":   "white",
+        "axes.edgecolor":   "#444",
+        "axes.linewidth":   0.9,
+        "axes.titleweight": "bold",
+        "axes.titlepad":    14,
+        "axes.titlesize":   13,
+        "axes.labelsize":   11,
+        "xtick.labelsize":  9.5,
+        "ytick.labelsize":  9.5,
+        "legend.frameon":   True,
+        "legend.framealpha": 0.95,
+        "legend.edgecolor": "#ccc",
+        "grid.linestyle":   ":",
+        "grid.alpha":       0.55,
+        "savefig.facecolor": "white",
+    })
 
 
 # =============================================================================
@@ -218,81 +255,266 @@ def tabla_por_departamento(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =============================================================================
-# 5. FIGURAS
+# 5. FIGURAS — estilo publicación con seaborn
 # =============================================================================
+def _anotar_fuente(fig: "plt.Figure", texto: str = NOTA_FUENTE) -> None:
+    """Pie de figura con la fuente de los datos."""
+    fig.text(0.995, 0.005, texto, ha="right", va="bottom",
+             fontsize=8.2, style="italic", color="#666")
+
+
 def figura_boxplot_periodo(df: pd.DataFrame, ruta_out: str) -> None:
-    """Boxplot del puntaje genérico por cohorte temporal."""
-    fig, ax = plt.subplots(figsize=(7, 5))
-    datos = [df.loc[df["periodo_ia"] == p, "puntaje_saberpro_generico"].dropna()
-             for p in (0, 1)]
-    ax.boxplot(datos, labels=["2021-2022\n(pre-IA)", "2023-2024\n(IA Gen)"])
-    ax.set_ylabel("Puntaje Saber Pro genérico (0-300)")
-    ax.set_title("Distribución del puntaje genérico por cohorte")
-    ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+    """Violin + box del puntaje genérico por cohorte, con prueba t anotada."""
+    _aplicar_estilo()
+    d = df.copy()
+    d["Cohorte"] = d["periodo_ia"].map(
+        {0: "2021-2022 (pre-IA)", 1: "2023-2024 (IA Gen)"}
+    )
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    sns.violinplot(
+        data=d, x="Cohorte", y="puntaje_saberpro_generico",
+        hue="Cohorte", palette=PALETA_COHORTES, inner=None,
+        linewidth=0, alpha=0.42, legend=False, ax=ax,
+    )
+    sns.boxplot(
+        data=d, x="Cohorte", y="puntaje_saberpro_generico",
+        hue="Cohorte", palette=PALETA_COHORTES, width=0.18,
+        fliersize=0, linewidth=1.3, legend=False, ax=ax,
+    )
+
+    # Marcadores de media (diamantes blancos con borde negro).
+    medias = d.groupby("Cohorte", observed=True)["puntaje_saberpro_generico"].mean()
+    for i, (_, mu) in enumerate(medias.items()):
+        ax.scatter(i, mu, marker="D", s=70, color="white",
+                   edgecolor="black", linewidth=1.5, zorder=10)
+
+    # Prueba t de Welch.
+    s0 = d.loc[d["periodo_ia"] == 0, "puntaje_saberpro_generico"].dropna()
+    s1 = d.loc[d["periodo_ia"] == 1, "puntaje_saberpro_generico"].dropna()
+    t, p = stats.ttest_ind(s0, s1, equal_var=False)
+    delta = s1.mean() - s0.mean()
+    p_str = "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
+
+    ax.set_title("Distribución del puntaje genérico Saber Pro por cohorte temporal")
+    ax.set_xlabel("")
+    ax.set_ylabel("Puntaje genérico (escala 0-300)")
+    ax.text(
+        0.5, 0.97,
+        f"Δ medias = {delta:+.2f}   |   t de Welch = {t:.2f}, {p_str}   |   "
+        f"n₁ = {len(s0):,}, n₂ = {len(s1):,}",
+        transform=ax.transAxes, ha="center", va="top",
+        fontsize=9.5, style="italic", color="#333",
+        bbox=dict(boxstyle="round,pad=0.45", fc="white",
+                  ec="#bbb", lw=0.7, alpha=0.95),
+    )
+    _anotar_fuente(fig)
     fig.tight_layout()
-    fig.savefig(ruta_out, dpi=150, bbox_inches="tight")
+    fig.savefig(ruta_out, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 
 def figura_boxplot_departamento(df: pd.DataFrame, ruta_out: str) -> None:
-    """Boxplot del puntaje genérico por departamento (ordenado por mediana)."""
-    fig, ax = plt.subplots(figsize=(14, 6))
-    grupos = (df.groupby("departamento_nombre")["puntaje_saberpro_generico"]
-                .median().sort_values(ascending=False))
-    datos = [df.loc[df["departamento_nombre"] == d, "puntaje_saberpro_generico"].dropna()
-             for d in grupos.index]
-    ax.boxplot(datos, labels=grupos.index, showfliers=False)
-    ax.set_ylabel("Puntaje Saber Pro genérico (0-300)")
-    ax.set_title("Puntaje genérico por departamento de la IES")
-    ax.tick_params(axis="x", rotation=75, labelsize=8)
-    ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+    """Boxplot agrupado: puntaje por departamento × cohorte."""
+    _aplicar_estilo()
+    d = df.copy()
+    d["Cohorte"] = d["periodo_ia"].map({0: "2021-2022", 1: "2023-2024"})
+
+    # Ordenar departamentos por la mediana global del puntaje.
+    orden = (
+        df.groupby("departamento_nombre")["puntaje_saberpro_generico"]
+        .median().sort_values(ascending=False).index.tolist()
+    )
+
+    paleta_short = {"2021-2022": "#3A6FB0", "2023-2024": "#E07A3F"}
+
+    fig, ax = plt.subplots(figsize=(15, 7))
+    sns.boxplot(
+        data=d, x="departamento_nombre", y="puntaje_saberpro_generico",
+        hue="Cohorte", order=orden, palette=paleta_short,
+        fliersize=2, linewidth=0.9, ax=ax,
+    )
+
+    # Línea vertical para señalar a Bogotá como referencia.
+    if "BOGOTA" in orden:
+        ax.axvline(orden.index("BOGOTA"), color="#cc3a3a",
+                   linewidth=1.0, linestyle="--", alpha=0.45, zorder=0)
+        ax.text(orden.index("BOGOTA"), ax.get_ylim()[1], " Bogotá (ref.)",
+                color="#cc3a3a", fontsize=9, fontweight="bold", va="top")
+
+    ax.set_title("Puntaje genérico Saber Pro por departamento de la IES y cohorte")
+    ax.set_xlabel("Departamento de la IES (ordenado por mediana)")
+    ax.set_ylabel("Puntaje genérico (0-300)")
+    ax.tick_params(axis="x", rotation=70, labelsize=8.5)
+    ax.legend(title="Cohorte", loc="upper right")
+
+    _anotar_fuente(fig)
     fig.tight_layout()
-    fig.savefig(ruta_out, dpi=150, bbox_inches="tight")
+    fig.savefig(ruta_out, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 
 def figura_histograma_cohortes(df: pd.DataFrame, ruta_out: str) -> None:
-    """Histograma comparativo del puntaje genérico entre cohortes."""
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for p, etiqueta, alpha in [(0, "2021-2022", 0.55), (1, "2023-2024", 0.55)]:
-        ax.hist(df.loc[df["periodo_ia"] == p, "puntaje_saberpro_generico"].dropna(),
-                bins=40, alpha=alpha, label=etiqueta, edgecolor="white", linewidth=0.4)
-    ax.set_xlabel("Puntaje Saber Pro genérico")
+    """Histograma + KDE comparativo entre cohortes con líneas de media."""
+    _aplicar_estilo()
+    d = df.copy()
+    d["Cohorte"] = d["periodo_ia"].map(
+        {0: "2021-2022 (pre-IA)", 1: "2023-2024 (IA Gen)"}
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.histplot(
+        data=d, x="puntaje_saberpro_generico", hue="Cohorte",
+        bins=50, palette=PALETA_COHORTES, alpha=0.55, kde=True,
+        edgecolor="white", linewidth=0.5, ax=ax,
+    )
+
+    # Líneas verticales en las medias.
+    medias = d.groupby("Cohorte", observed=True)["puntaje_saberpro_generico"].mean()
+    for cohorte, mu in medias.items():
+        color = PALETA_COHORTES[cohorte]
+        ax.axvline(mu, color=color, linestyle="--", linewidth=1.6, alpha=0.85)
+        ax.text(mu, ax.get_ylim()[1] * 0.95, f"  μ = {mu:.1f}",
+                color=color, fontweight="bold", fontsize=9.5,
+                rotation=90, va="top", ha="left")
+
+    ax.set_title("Distribución del puntaje genérico Saber Pro por cohorte")
+    ax.set_xlabel("Puntaje genérico (0-300)")
     ax.set_ylabel("Frecuencia")
-    ax.set_title("Distribución de puntajes por cohorte")
-    ax.legend()
-    ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+    _anotar_fuente(fig)
     fig.tight_layout()
-    fig.savefig(ruta_out, dpi=150, bbox_inches="tight")
+    fig.savefig(ruta_out, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 
 def figura_dispersion_distancia(df: pd.DataFrame, ruta_out: str) -> None:
-    """Dispersión: distancia a Bogotá vs puntaje medio por departamento."""
-    medias = (df.groupby(["departamento_nombre", "distancia_bogota_km"])
-                ["puntaje_saberpro_generico"].mean().reset_index())
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.scatter(medias["distancia_bogota_km"], medias["puntaje_saberpro_generico"],
-               s=50, alpha=0.85)
-    # Línea de tendencia simple (regresión lineal univariada por OLS).
-    x = medias["distancia_bogota_km"].values
-    y = medias["puntaje_saberpro_generico"].values
+    """Dispersión distancia ↔ puntaje medio por departamento.
+
+    El tamaño del marcador es proporcional al número de estudiantes
+    y el color codifica la distancia a Bogotá.
+    """
+    _aplicar_estilo()
+    agg = (
+        df.groupby(["departamento_nombre", "distancia_bogota_km"])
+        .agg(puntaje_medio=("puntaje_saberpro_generico", "mean"),
+             n_estudiantes=("puntaje_saberpro_generico", "count"))
+        .reset_index()
+    )
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+    tamanos = (agg["n_estudiantes"] / agg["n_estudiantes"].max() * 600 + 50).values
+    sc = ax.scatter(
+        agg["distancia_bogota_km"], agg["puntaje_medio"],
+        s=tamanos, c=agg["distancia_bogota_km"],
+        cmap="viridis_r", alpha=0.78,
+        edgecolor="white", linewidth=1.2, zorder=3,
+    )
+
+    # Recta de ajuste OLS (ponderada por raíz de n para reflejar precisión).
+    x = agg["distancia_bogota_km"].values.astype(float)
+    y = agg["puntaje_medio"].values.astype(float)
     if len(x) >= 2:
-        coef = np.polyfit(x, y, deg=1)
-        xs = np.linspace(x.min(), x.max(), 100)
-        ax.plot(xs, np.polyval(coef, xs), linestyle="--", linewidth=1.2,
-                label=f"OLS: y = {coef[0]:.3f}·x + {coef[1]:.1f}")
-    for _, row in medias.iterrows():
-        ax.annotate(row["departamento_nombre"][:6],
-                    (row["distancia_bogota_km"], row["puntaje_saberpro_generico"]),
-                    fontsize=7, alpha=0.7)
-    ax.set_xlabel("Distancia a Bogotá D.C. (km)")
+        w = np.sqrt(agg["n_estudiantes"].values)
+        coef = np.polyfit(x, y, deg=1, w=w)
+        xs = np.linspace(0, x.max() * 1.05, 100)
+        ax.plot(xs, np.polyval(coef, xs), linestyle="--", color="#222",
+                linewidth=2.0, alpha=0.78, zorder=2,
+                label=f"OLS ponderada: y = {coef[0]:+.4f}·dist + {coef[1]:.1f}")
+
+    # Etiquetas para departamentos destacados.
+    destacados = {"BOGOTA", "ANTIOQUIA", "VALLE", "HUILA", "AMAZONAS",
+                  "SAN ANDRES", "ATLANTICO", "NARINO", "VAUPES", "GUAINIA"}
+    for _, r in agg.iterrows():
+        if r["departamento_nombre"] in destacados:
+            ax.annotate(
+                r["departamento_nombre"].title()[:11],
+                (r["distancia_bogota_km"], r["puntaje_medio"]),
+                xytext=(8, 8), textcoords="offset points",
+                fontsize=8.6, fontweight="bold", color="#222",
+                bbox=dict(boxstyle="round,pad=0.2",
+                          fc="white", ec="none", alpha=0.75),
+            )
+
+    cbar = fig.colorbar(sc, ax=ax, shrink=0.75, pad=0.02)
+    cbar.set_label("Distancia (km)", fontsize=9.5)
+
+    ax.set_xlabel("Distancia terrestre a Bogotá D.C. (km)")
     ax.set_ylabel("Puntaje genérico medio por departamento")
-    ax.set_title("Centralización geográfica: distancia ↔ puntaje")
-    ax.legend()
-    ax.grid(True, linestyle=":", alpha=0.5)
+    ax.set_title("Centralización geográfica: distancia ↔ desempeño Saber Pro")
+    ax.legend(loc="lower left")
+    _anotar_fuente(
+        fig,
+        "Tamaño del marcador ∝ n estudiantes.  " + NOTA_FUENTE,
+    )
     fig.tight_layout()
-    fig.savefig(ruta_out, dpi=150, bbox_inches="tight")
+    fig.savefig(ruta_out, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
+# -----------------------------------------------------------------------------
+# Figuras adicionales sugeridas para el manuscrito
+# -----------------------------------------------------------------------------
+def figura_heatmap_dpto_cohorte(df: pd.DataFrame, ruta_out: str) -> None:
+    """Heatmap del puntaje medio por departamento × cohorte (ordenado)."""
+    _aplicar_estilo()
+    pivot = (
+        df.pivot_table(values="puntaje_saberpro_generico",
+                       index="departamento_nombre",
+                       columns="periodo_ia", aggfunc="mean")
+    )
+    pivot.columns = ["2021-2022 (pre-IA)", "2023-2024 (IA Gen)"]
+    pivot["Δ (post − pre)"] = pivot["2023-2024 (IA Gen)"] - pivot["2021-2022 (pre-IA)"]
+    pivot = pivot.sort_values("2023-2024 (IA Gen)", ascending=False)
+
+    fig, ax = plt.subplots(figsize=(8, max(6, 0.32 * len(pivot))))
+    centro = pivot[["2021-2022 (pre-IA)", "2023-2024 (IA Gen)"]].mean().mean()
+    sns.heatmap(
+        pivot, annot=True, fmt=".1f", cmap="RdYlBu_r", center=centro,
+        linewidths=0.5, linecolor="white",
+        cbar_kws={"label": "Puntaje medio"}, ax=ax,
+    )
+    ax.set_title("Puntaje genérico medio por departamento y cohorte")
+    ax.set_xlabel("")
+    ax.set_ylabel("Departamento")
+    _anotar_fuente(fig)
+    fig.tight_layout()
+    fig.savefig(ruta_out, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
+def figura_violines_por_modulo(df: pd.DataFrame, ruta_out: str) -> None:
+    """Violines partidos comparando cohortes en los cinco módulos genéricos."""
+    _aplicar_estilo()
+    etiquetas = {
+        "punt_lectura_critica":  "Lectura\nCrítica",
+        "punt_razona_cuant":     "Razonamiento\nCuantitativo",
+        "punt_competen_ciud":    "Competencias\nCiudadanas",
+        "punt_comuni_escrita":   "Comunicación\nEscrita",
+        "punt_ingles":           "Inglés",
+    }
+    largo = df.melt(
+        id_vars=["periodo_ia"], value_vars=list(etiquetas),
+        var_name="modulo_raw", value_name="puntaje",
+    )
+    largo["Módulo"] = largo["modulo_raw"].map(etiquetas)
+    largo["Cohorte"] = largo["periodo_ia"].map(
+        {0: "2021-2022 (pre-IA)", 1: "2023-2024 (IA Gen)"}
+    )
+
+    fig, ax = plt.subplots(figsize=(12, 6.5))
+    sns.violinplot(
+        data=largo, x="Módulo", y="puntaje", hue="Cohorte",
+        split=True, palette=PALETA_COHORTES,
+        inner="quart", linewidth=1.0, order=list(etiquetas.values()),
+        ax=ax,
+    )
+    ax.set_title("Distribución por módulo genérico y cohorte temporal")
+    ax.set_xlabel("Módulo de competencias genéricas")
+    ax.set_ylabel("Puntaje (0-300)")
+    ax.legend(title="Cohorte", loc="upper right")
+    _anotar_fuente(fig)
+    fig.tight_layout()
+    fig.savefig(ruta_out, dpi=200, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -300,10 +522,17 @@ def figura_dispersion_distancia(df: pd.DataFrame, ruta_out: str) -> None:
 # 6. ORQUESTADOR
 # =============================================================================
 def ejecutar_analisis_descriptivo(
-    ruta_proyecto: str,
+    ruta_proyecto: Optional[str] = None,
 ) -> Dict[str, object]:
-    """Pipeline completo de la Parte 1. Devuelve dict con tablas y rutas."""
+    """Pipeline completo de la Parte 1. Devuelve dict con tablas y rutas.
+
+    Si `ruta_proyecto` es None y se está en Colab, monta Drive y usa
+    `/content/drive/MyDrive/IA_EDUCACION_SUPERIOR`.
+    """
     _registrar("== INICIO ANÁLISIS DESCRIPTIVO (Parte 1) ==")
+    if ruta_proyecto is None:
+        montar_drive_si_aplica()
+        ruta_proyecto = RUTA_DEFECTO
     df = cargar_consolidado(ruta_proyecto)
 
     dir_tablas = os.path.join(ruta_proyecto, "procesados", "resultados")
@@ -323,12 +552,14 @@ def ejecutar_analisis_descriptivo(
                    index=False, encoding="utf-8-sig")
     _registrar(f"  Tabla por departamento guardada ({len(tab_dep)} dptos).")
 
-    # Figuras
-    figura_boxplot_periodo(df, os.path.join(dir_figuras, "fig_boxplot_periodo.png"))
-    figura_boxplot_departamento(df, os.path.join(dir_figuras, "fig_boxplot_departamento.png"))
-    figura_histograma_cohortes(df, os.path.join(dir_figuras, "fig_histograma_cohortes.png"))
-    figura_dispersion_distancia(df, os.path.join(dir_figuras, "fig_dispersion_distancia.png"))
-    _registrar("  Cuatro figuras guardadas.")
+    # Figuras (6 en total — estilo publicación)
+    figura_boxplot_periodo(df,        os.path.join(dir_figuras, "fig_01_boxplot_periodo.png"))
+    figura_histograma_cohortes(df,    os.path.join(dir_figuras, "fig_02_histograma_cohortes.png"))
+    figura_violines_por_modulo(df,    os.path.join(dir_figuras, "fig_03_modulos_cohorte.png"))
+    figura_boxplot_departamento(df,   os.path.join(dir_figuras, "fig_04_boxplot_departamento.png"))
+    figura_heatmap_dpto_cohorte(df,   os.path.join(dir_figuras, "fig_05_heatmap_departamento.png"))
+    figura_dispersion_distancia(df,   os.path.join(dir_figuras, "fig_06_dispersion_distancia.png"))
+    _registrar("  Seis figuras de calidad publicación guardadas.")
 
     _registrar("== FIN ANÁLISIS DESCRIPTIVO ==")
     return {
@@ -346,8 +577,9 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Parte 1: análisis bivariado / descriptivo Saber Pro.",
     )
-    p.add_argument("--ruta", "-r", required=True,
-                   help="Carpeta del proyecto que contiene `procesados/`.")
+    p.add_argument("--ruta", "-r", default=None,
+                   help="Carpeta del proyecto. Omitir en Colab para usar "
+                        "`Mi unidad/IA_EDUCACION_SUPERIOR`.")
     return p
 
 

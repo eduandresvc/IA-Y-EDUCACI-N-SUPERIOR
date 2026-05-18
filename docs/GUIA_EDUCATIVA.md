@@ -178,11 +178,56 @@ def _normalizar_texto(valor: object) -> str:
 - **`pd.to_numeric(s, errors="coerce")`** — convierte a número; los
   fallos se vuelven `NaN`.
 
-### B.6 Conexión opcional con Google Drive
+### B.6 Soporte para Google Colab
+
+Tres funciones que cooperan para que el módulo "funcione solo" en
+Colab sin perder portabilidad local.
+
+#### `en_colab()`
+
+```python
+def en_colab() -> bool:
+    return "google.colab" in sys.modules or os.path.exists("/content")
+```
+
+- **`"google.colab" in sys.modules`** — detecta si el módulo de Colab
+  fue cargado.
+- **`os.path.exists("/content")`** — Colab siempre crea ese directorio
+  en su VM; sirve como segundo indicador.
+- **`or`** — operador booleano: basta con que una de las dos
+  condiciones se cumpla.
+
+#### `instalar_dependencias_si_aplica(paquetes)`
+
+```python
+def instalar_dependencias_si_aplica(paquetes=PAQUETES_REQUERIDOS) -> None:
+    if not en_colab():
+        return
+    import importlib.util, subprocess
+    faltan = [p for p in paquetes
+              if importlib.util.find_spec(p.replace("-", "_")) is None]
+    if faltan:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-q", *faltan]
+        )
+```
+
+- **`importlib.util.find_spec(nombre)`** — comprueba si un módulo se
+  puede importar sin ejecutar el `import`. Devuelve `None` si no se
+  encuentra.
+- **Comprensión de lista filtrada** — produce sólo los paquetes que
+  faltan.
+- **`subprocess.check_call(args)`** — ejecuta un comando externo; lanza
+  excepción si el código de salida no es 0.
+- **`[sys.executable, "-m", "pip", "install", "-q", *faltan]`** —
+  invoca el `pip` del intérprete actual. El `*faltan` desempaqueta la
+  lista dentro de la lista mayor (estilo `splat`).
+
+#### `montar_drive_si_aplica`
 
 ```python
 def montar_drive_si_aplica(punto_montaje: str = "/content/drive") -> bool:
-    if "google.colab" not in sys.modules and not os.path.exists("/content"):
+    if not en_colab():
         return False
     try:
         from google.colab import drive  # type: ignore
@@ -195,8 +240,45 @@ def montar_drive_si_aplica(punto_montaje: str = "/content/drive") -> bool:
 
 - **`try / except ImportError`** — manejo controlado de import opcional.
 - **Lazy import** — `from google.colab import drive` dentro de la
-  función, no en la cabecera.
-- **`os.path.ismount(...)`** — `True` si la ruta es un punto de montaje.
+  función, no en la cabecera. Así el script sigue siendo importable en
+  máquinas sin `google.colab`.
+- **`os.path.ismount(...)`** — `True` si la ruta es un punto de
+  montaje (evita montar dos veces).
+- **`force_remount=False`** — no vuelve a pedir autorización si ya
+  está montado.
+
+#### `setup_colab()`
+
+```python
+def setup_colab() -> None:
+    instalar_dependencias_si_aplica()
+    montar_drive_si_aplica()
+```
+
+- **Función sin parámetros** — combina las dos anteriores. Es lo que
+  `ejecutar_pipeline(ruta_proyecto=None)` invoca internamente cuando
+  detecta que debe usar la ruta por defecto.
+
+### B.6.bis Parámetro opcional con valor por defecto
+
+```python
+def ejecutar_pipeline(
+    ruta_proyecto: Optional[str] = None,
+    ...
+) -> Tuple[Dict[int, pd.DataFrame], pd.DataFrame]:
+    if ruta_proyecto is None:
+        setup_colab()
+        ruta_proyecto = RUTA_DEFECTO
+    ...
+```
+
+- **`Optional[str]`** — equivalente a `Union[str, None]` (de `typing`).
+- **`= None`** — valor por defecto. Permite invocar la función sin
+  argumentos.
+- **`is None`** — comparación de identidad, la forma idiomática de
+  detectar `None` en Python (no usar `== None`).
+- **Reasignación de parámetro**: `ruta_proyecto = RUTA_DEFECTO`
+  reemplaza la variable local; no afecta al caller.
 
 ### B.7 Lectura robusta
 

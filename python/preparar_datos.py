@@ -73,12 +73,19 @@ import pandas as pd
 # =============================================================================
 PATRON_ARCHIVO: str = "Examen_Saber_Pro_Genericas_{anio}.txt"
 
+# Ruta por defecto cuando se ejecuta en Google Colab: "Mi unidad" se
+# monta en /content/drive/MyDrive cuando se invoca `drive.mount(...)`.
+RUTA_DEFECTO: str = "/content/drive/MyDrive/IA_EDUCACION_SUPERIOR"
+
 ANIOS: List[int] = [2021, 2022, 2023, 2024]
 ANIOS_PREVIO: List[int] = [2021, 2022]   # periodo_ia = 0
 ANIOS_IA: List[int] = [2023, 2024]       # periodo_ia = 1
 
 SEPARADORES_CANDIDATOS: Tuple[str, ...] = ("¦", "|", "\t", ";", ",")
 CODIFICACIONES_CANDIDATAS: Tuple[str, ...] = ("utf-8", "latin-1", "cp1252")
+
+# Paquetes que el módulo necesita además de los preinstalados en Colab.
+PAQUETES_REQUERIDOS: Tuple[str, ...] = ("pandas", "numpy")
 
 # -----------------------------------------------------------------------------
 # 1.1  Columnas REQUERIDAS desde DataICFES (período 2021-2024).
@@ -287,16 +294,36 @@ def _a_numerico(serie: pd.Series) -> pd.Series:
 
 
 # =============================================================================
-# 3. CONEXIÓN OPCIONAL CON GOOGLE DRIVE
+# 3. SOPORTE PARA GOOGLE COLAB
 # =============================================================================
+def en_colab() -> bool:
+    """True si el script se está ejecutando dentro de Google Colab."""
+    return "google.colab" in sys.modules or os.path.exists("/content")
+
+
+def instalar_dependencias_si_aplica(
+    paquetes: Iterable[str] = PAQUETES_REQUERIDOS,
+) -> None:
+    """En Colab: hace `pip install` silencioso de los paquetes faltantes."""
+    if not en_colab():
+        return
+    import importlib.util
+    import subprocess
+    faltan = [p for p in paquetes
+              if importlib.util.find_spec(p.replace("-", "_")) is None]
+    if faltan:
+        _registrar(f"Instalando paquetes faltantes en Colab: {faltan}")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "-q", *faltan]
+        )
+
+
 def montar_drive_si_aplica(punto_montaje: str = "/content/drive") -> bool:
     """Si estamos en Google Colab, monta Drive y devuelve True. Si no, False.
 
-    El script no requiere Colab. Esta función es solo un atajo para quienes
-    deseen ejecutarlo desde un cuaderno de Colab antes de invocar el
-    pipeline. Devuelve True si Drive quedó montado y False en caso contrario.
+    Devuelve True si Drive quedó montado y False en caso contrario.
     """
-    if "google.colab" not in sys.modules and not os.path.exists("/content"):
+    if not en_colab():
         return False
     try:
         from google.colab import drive  # type: ignore
@@ -306,6 +333,12 @@ def montar_drive_si_aplica(punto_montaje: str = "/content/drive") -> bool:
         _registrar(f"Montando Google Drive en {punto_montaje} ...")
         drive.mount(punto_montaje, force_remount=False)
     return True
+
+
+def setup_colab() -> None:
+    """Acceso único para Colab: instala deps + monta Drive (si aplica)."""
+    instalar_dependencias_si_aplica()
+    montar_drive_si_aplica()
 
 
 # =============================================================================
@@ -690,7 +723,7 @@ def persistir(ruta_proyecto: str,
 # 8. ORQUESTADOR
 # =============================================================================
 def ejecutar_pipeline(
-    ruta_proyecto: str,
+    ruta_proyecto: Optional[str] = None,
     anios: Iterable[int] = ANIOS,
     persistir_disco: bool = True,
 ) -> Tuple[Dict[int, pd.DataFrame], pd.DataFrame]:
@@ -698,8 +731,10 @@ def ejecutar_pipeline(
 
     Parámetros
     ----------
-    ruta_proyecto : str
-        Carpeta que contiene los `Examen_Saber_Pro_Genericas_<año>.txt`.
+    ruta_proyecto : str, opcional
+        Carpeta con los `Examen_Saber_Pro_Genericas_<año>.txt`.
+        Si es None y se está en Google Colab, monta Drive y usa
+        `/content/drive/MyDrive/IA_EDUCACION_SUPERIOR`.
     anios : iterable de int
         Años a procesar (por defecto 2021-2024).
     persistir_disco : bool
@@ -711,8 +746,15 @@ def ejecutar_pipeline(
         Diccionario {año: DataFrame} y el DataFrame consolidado.
     """
     _registrar("== INICIO DEL PIPELINE ==")
+    if ruta_proyecto is None:
+        # Modo Colab: monta Drive y usa la ruta por defecto en MyDrive.
+        setup_colab()
+        ruta_proyecto = RUTA_DEFECTO
     if not os.path.isdir(ruta_proyecto):
-        raise FileNotFoundError(f"Carpeta no existe: {ruta_proyecto}")
+        raise FileNotFoundError(
+            f"Carpeta no existe: {ruta_proyecto}\n"
+            "En Colab: cree 'Mi unidad/IA_EDUCACION_SUPERIOR' y suba allí los .txt."
+        )
     dfs: Dict[int, pd.DataFrame] = {}
     for anio in anios:
         _registrar(f"-- Procesando año {anio} --")
@@ -732,8 +774,9 @@ def _construir_parser() -> argparse.ArgumentParser:
         description="Pipeline de preparación de datos Saber Pro 2021-2024.",
     )
     parser.add_argument(
-        "--ruta", "-r", required=True,
-        help="Carpeta con los archivos Examen_Saber_Pro_Genericas_<año>.txt.",
+        "--ruta", "-r", default=None,
+        help="Carpeta con los archivos Examen_Saber_Pro_Genericas_<año>.txt. "
+             "Omitir en Colab para usar `Mi unidad/IA_EDUCACION_SUPERIOR`.",
     )
     parser.add_argument(
         "--anios", "-a", nargs="+", type=int, default=ANIOS,

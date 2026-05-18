@@ -167,8 +167,18 @@ final conserva.
 
 ### 5.6 Ejecución
 
+**Local:**
+
 ```bash
 python python/preparar_datos.py --ruta /carpeta/con/los_txt
+```
+
+**Google Colab:** `--ruta` es opcional; cuando se omite, monta Drive y
+usa `/content/drive/MyDrive/IA_EDUCACION_SUPERIOR`:
+
+```python
+from preparar_datos import ejecutar_pipeline
+dfs, df_consolidado = ejecutar_pipeline()      # equivalente sin args
 ```
 
 ---
@@ -281,7 +291,7 @@ python python/regresion_mco.py --ruta /carpeta/con/procesados
 Orquestador único que encadena los tres módulos.
 
 ```bash
-# Todo:
+# Local:
 python python/main.py --ruta /carpeta/con/los_txt
 
 # Solo regresión, reusando `procesados/` existente:
@@ -290,6 +300,64 @@ python python/main.py --ruta /carpeta --solo regresion
 # Reanudar tras preparar_datos sin volver a ejecutarlo:
 python python/main.py --ruta /carpeta --saltar-preparar
 ```
+
+En Colab basta:
+
+```python
+from main import ejecutar_todo
+ejecutar_todo()                    # ruta por defecto en Drive
+ejecutar_todo(correr_preparar=False)   # solo descriptivo + regresión
+```
+
+---
+
+## 8.bis Ejecución en Google Colab
+
+Hay tres formas equivalentes, en orden de preferencia:
+
+### a) Cuaderno listo (recomendado)
+
+Abrir `python/pipeline_colab.ipynb` en Colab y ejecutar las celdas en
+orden. El cuaderno se encarga del montaje de Drive, la copia de los
+scripts desde Drive a `/content/` y la ejecución de las tres partes.
+
+### b) Ejecutar los módulos directamente
+
+```python
+# Celda 1 — montar Drive
+from google.colab import drive
+drive.mount('/content/drive')
+
+# Celda 2 — hacer accesibles los .py
+import sys, shutil, os
+DRIVE = '/content/drive/MyDrive/IA_EDUCACION_SUPERIOR'
+for s in ('preparar_datos.py', 'analisis_descriptivo.py',
+          'regresion_mco.py', 'main.py'):
+    src = os.path.join(DRIVE, 'python', s)
+    if os.path.exists(src):
+        shutil.copy(src, '/content')
+sys.path.insert(0, '/content')
+
+# Celda 3 — pipeline completo (ruta automática a Drive)
+from main import ejecutar_todo
+ejecutar_todo()
+```
+
+### c) Vía CLI con `%run`
+
+```python
+%run /content/main.py
+# o, para una sola parte:
+%run /content/regresion_mco.py
+```
+
+En cualquiera de las tres modalidades:
+
+- `ruta_proyecto=None` (predeterminado) ⇒ se monta Drive y se usa
+  `Mi unidad/IA_EDUCACION_SUPERIOR`.
+- Las dependencias (`scipy`, `statsmodels`, `matplotlib`) se
+  auto-instalan si llegasen a faltar (en Colab moderno ya están
+  preinstaladas).
 
 ---
 
