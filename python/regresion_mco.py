@@ -65,6 +65,15 @@ import os
 import warnings
 from typing import Dict, List, Optional, Tuple
 
+# Bootstrap perezoso: en Colab instala statsmodels/scipy si faltan
+# antes de importarlos. En Colab moderno ya vienen preinstalados.
+from preparar_datos import (
+    MODULOS_GENERICOS, _registrar,
+    RUTA_DEFECTO, en_colab, instalar_dependencias_si_aplica,
+    montar_drive_si_aplica,
+)
+instalar_dependencias_si_aplica(("scipy", "statsmodels"))
+
 import numpy as np
 import pandas as pd
 
@@ -76,8 +85,6 @@ from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.stats.stattools import durbin_watson
 from statsmodels.stats.multitest import multipletests
 from scipy import stats
-
-from preparar_datos import MODULOS_GENERICOS, _registrar
 
 
 # =============================================================================
@@ -380,9 +387,18 @@ def aplicar_correcciones(beta_ia_df: pd.DataFrame) -> pd.DataFrame:
 # =============================================================================
 # 10. ORQUESTADOR PRINCIPAL
 # =============================================================================
-def ejecutar_regresion(ruta_proyecto: str) -> Dict[str, pd.DataFrame]:
-    """Pipeline completo de la Parte 2."""
+def ejecutar_regresion(
+    ruta_proyecto: Optional[str] = None,
+) -> Dict[str, pd.DataFrame]:
+    """Pipeline completo de la Parte 2.
+
+    Si `ruta_proyecto` es None y se está en Colab, monta Drive y usa
+    `/content/drive/MyDrive/IA_EDUCACION_SUPERIOR`.
+    """
     _registrar("== INICIO REGRESIÓN MCO (Parte 2) ==")
+    if ruta_proyecto is None:
+        montar_drive_si_aplica()
+        ruta_proyecto = RUTA_DEFECTO
     df = cargar_y_preparar(ruta_proyecto)
 
     dir_tablas = os.path.join(ruta_proyecto, "procesados", "resultados")
@@ -421,8 +437,9 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Parte 2: regresión lineal múltiple MCO (18 modelos).",
     )
-    p.add_argument("--ruta", "-r", required=True,
-                   help="Carpeta del proyecto con `procesados/df_consolidado.csv`.")
+    p.add_argument("--ruta", "-r", default=None,
+                   help="Carpeta del proyecto. Omitir en Colab para usar "
+                        "`Mi unidad/IA_EDUCACION_SUPERIOR`.")
     return p
 
 

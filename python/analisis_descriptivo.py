@@ -33,7 +33,17 @@ from __future__ import annotations
 
 import argparse
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+# Bootstrap perezoso: si estamos en Colab y faltan scipy/matplotlib,
+# se instalan antes de importarlos. En entornos locales se asume que el
+# usuario ya los tiene; en Colab estos paquetes vienen preinstalados.
+from preparar_datos import (
+    MODULOS_GENERICOS, _registrar, ANIOS_PREVIO, ANIOS_IA,
+    RUTA_DEFECTO, en_colab, instalar_dependencias_si_aplica,
+    montar_drive_si_aplica,
+)
+instalar_dependencias_si_aplica(("scipy", "matplotlib"))
 
 import numpy as np
 import pandas as pd
@@ -42,10 +52,6 @@ from scipy import stats
 import matplotlib
 matplotlib.use("Agg")              # backend sin GUI (válido en servidores).
 import matplotlib.pyplot as plt    # noqa: E402  (import después de use)
-
-from preparar_datos import (
-    MODULOS_GENERICOS, _registrar, ANIOS_PREVIO, ANIOS_IA,
-)
 
 
 # =============================================================================
@@ -300,10 +306,17 @@ def figura_dispersion_distancia(df: pd.DataFrame, ruta_out: str) -> None:
 # 6. ORQUESTADOR
 # =============================================================================
 def ejecutar_analisis_descriptivo(
-    ruta_proyecto: str,
+    ruta_proyecto: Optional[str] = None,
 ) -> Dict[str, object]:
-    """Pipeline completo de la Parte 1. Devuelve dict con tablas y rutas."""
+    """Pipeline completo de la Parte 1. Devuelve dict con tablas y rutas.
+
+    Si `ruta_proyecto` es None y se está en Colab, monta Drive y usa
+    `/content/drive/MyDrive/IA_EDUCACION_SUPERIOR`.
+    """
     _registrar("== INICIO ANÁLISIS DESCRIPTIVO (Parte 1) ==")
+    if ruta_proyecto is None:
+        montar_drive_si_aplica()
+        ruta_proyecto = RUTA_DEFECTO
     df = cargar_consolidado(ruta_proyecto)
 
     dir_tablas = os.path.join(ruta_proyecto, "procesados", "resultados")
@@ -346,8 +359,9 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Parte 1: análisis bivariado / descriptivo Saber Pro.",
     )
-    p.add_argument("--ruta", "-r", required=True,
-                   help="Carpeta del proyecto que contiene `procesados/`.")
+    p.add_argument("--ruta", "-r", default=None,
+                   help="Carpeta del proyecto. Omitir en Colab para usar "
+                        "`Mi unidad/IA_EDUCACION_SUPERIOR`.")
     return p
 
 
