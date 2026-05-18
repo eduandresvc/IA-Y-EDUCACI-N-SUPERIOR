@@ -1,6 +1,6 @@
-# Documentación técnica — `colab_pipeline.py`
+# Documentación técnica del proyecto
 
-Pipeline automatizado para la preparación de microdatos de la investigación:
+Investigación:
 
 > **Disparidades en el desempeño Saber Pro y su asociación con el período
 > de adopción de IA Generativa (2021–2024)**
@@ -10,279 +10,371 @@ Pipeline automatizado para la preparación de microdatos de la investigación:
 
 ## 1. Objetivo del proyecto
 
-El estudio estima, mediante regresión lineal múltiple por MCO, la asociación
+Estimar, mediante un análisis descriptivo comparativo (Parte 1) y un
+modelo de regresión lineal múltiple por MCO (Parte 2), la asociación
 condicional entre el período de adopción masiva de IA generativa
-(`periodo_ia = 1` para 2023–2024) y el puntaje en habilidades genéricas de
-Saber Pro, controlando por variables socioeconómicas, demográficas,
-académicas, institucionales y geográficas. El presente script automatiza
-toda la fase de **preparación de datos**:
-
-1. Conectar Google Colab con Google Drive.
-2. Cargar los archivos crudos `Examen_Saber_Pro_Genericas_<año>.txt`
-   ubicados en `Mi unidad/IA_EDUCACION_SUPERIOR`.
-3. Construir las variables operacionalizadas en la Sección 8 del documento.
-4. Conservar únicamente las columnas relevantes (Tablas 1 y 2 del
-   documento) y descartar las demás.
-5. Limpiar los datos (faltantes, formatos, rangos, duplicados).
-6. Persistir un dataframe por año (`df_2021` … `df_2024`) y un
-   dataframe consolidado `df_consolidado` listo para análisis.
+(`periodo_ia = 1` para 2023–2024) y los puntajes en competencias
+genéricas de la Prueba Saber Pro, controlando por variables
+socioeconómicas, demográficas, académicas, institucionales y
+geográficas. La fuente única de datos es DataICFES.
 
 ---
 
-## 2. Estructura del repositorio relevante para el pipeline
+## 2. Funcionamiento general del sistema
+
+El sistema se compone de **tres módulos Python independientes** que se
+ejecutan en cadena y se comunican a través de archivos en disco.
 
 ```
-IA-Y-EDUCACION-SUPERIOR/
-├── python/
-│   └── colab_pipeline.py          ← este script (pipeline completo)
-└── docs/
-    ├── DOCUMENTACION_TECNICA.md   ← este documento
-    └── GUIA_EDUCATIVA.md          ← glosario didáctico línea a línea
+        ┌─────────────────────────┐
+   txt  │  1. preparar_datos.py   │ ── procesados/df_consolidado.csv
+DataICFES│  (limpieza + variables) │
+        └─────────┬───────────────┘
+                  │
+                  ▼
+   ┌──────────────────────────────┐
+   │  2. analisis_descriptivo.py  │ ── resultados/tabla3_*.csv
+   │  (Parte 1, §9 del documento) │    figuras/*.png
+   └──────────┬───────────────────┘
+              │
+              ▼
+   ┌──────────────────────────────┐
+   │  3. regresion_mco.py         │ ── resultados/tabla4_*.csv
+   │  (Parte 2, §8 y §10)         │    diagnosticos.csv
+   └──────────────────────────────┘    beta_ia_resumen.csv
 ```
 
-En Google Drive el usuario debe disponer de:
-
-```
-Mi unidad/
-└── IA_EDUCACION_SUPERIOR/
-    ├── Examen_Saber_Pro_Genericas_2021.txt
-    ├── Examen_Saber_Pro_Genericas_2022.txt
-    ├── Examen_Saber_Pro_Genericas_2023.txt
-    ├── Examen_Saber_Pro_Genericas_2024.txt
-    └── procesados/                ← creado automáticamente por el pipeline
-        ├── df_2021.csv
-        ├── df_2022.csv
-        ├── df_2023.csv
-        ├── df_2024.csv
-        ├── df_consolidado.csv
-        └── df_consolidado.parquet  (si pyarrow está instalado)
-```
+Un cuarto módulo, `main.py`, orquesta los tres anteriores.
 
 ---
 
-## 3. Dependencias
+## 3. Estructura del código
 
-| Paquete        | Versión recomendada | Uso |
-|----------------|---------------------|-----|
-| `python`       | ≥ 3.10              | Lenguaje base. |
-| `pandas`       | ≥ 1.5               | Estructuras de datos (`DataFrame`, `Series`). |
-| `numpy`        | ≥ 1.23              | Soporte numérico y `np.nan`. |
-| `google.colab` | provisto por Colab  | Montaje de Google Drive. |
-| `pyarrow`      | opcional            | Exportación a parquet (más rápida que CSV). |
-
-> En Google Colab, `pandas`, `numpy` y `google.colab` ya están preinstalados.
-> Sólo se requiere instalar `pyarrow` si se desea el guardado en parquet.
-
----
-
-## 4. Estructura del módulo `colab_pipeline.py`
-
-El script se organiza en diez bloques numerados, en orden de ejecución:
-
-| Bloque | Responsabilidad |
-|-------:|-----------------|
-| 1 | Constantes del proyecto (rutas, años, mapeos de columnas, codificación de departamentos, distancias a Bogotá). |
-| 2 | Utilidades generales (`_normalizar_texto`, `_registrar`). |
-| 3 | Conexión con Google Drive (`montar_drive`). |
-| 4 | Lectura robusta de los `.txt` (`_detectar_separador_y_codificacion`, `leer_archivo_anio`). |
-| 5 | Normalización de nombres de columnas (`normalizar_columnas`). |
-| 6 | Construcción de las variables de la investigación (14 funciones especializadas + `construir_variables`). |
-| 7 | Limpieza (`seleccionar_variables_finales`, `limpiar_dataframe`). |
-| 8 | Procesamiento por año y consolidación (`procesar_anio`, `consolidar`, `persistir`). |
-| 9 | Orquestador `ejecutar_pipeline`. |
-| 10 | Ejecución directa (`if __name__ == "__main__":`). |
-
-### 4.1 Constantes principales
-
-| Constante | Tipo | Descripción |
-|---|---|---|
-| `RUTA_PROYECTO_DEFECTO` | `str` | `/content/drive/MyDrive/IA_EDUCACION_SUPERIOR`. |
-| `PATRON_ARCHIVO` | `str` | `Examen_Saber_Pro_Genericas_{anio}.txt`. |
-| `ANIOS`, `ANIOS_PREVIO`, `ANIOS_IA` | `list[int]` | Años analizados y particiones temporales. |
-| `SEPARADORES_CANDIDATOS` | `tuple[str]` | Caracteres delimitadores que se prueban automáticamente. |
-| `CODIFICACIONES_CANDIDATAS` | `tuple[str]` | Codificaciones probables del archivo. |
-| `MAPA_COLUMNAS` | `dict[str, str]` | Renombramiento crudo → operativo. |
-| `VARIABLES_FINALES` | `list[str]` | Columnas que sobreviven a la depuración. |
-| `MODULOS_GENERICOS` | `list[str]` | Las 5 puntuaciones que conforman el agregado. |
-| `DEPARTAMENTOS` | `dict[str, tuple[int, float]]` | Codificación 0–32 + distancia oficial a Bogotá. |
-| `ALIAS_DEPARTAMENTOS` | `dict[str, str]` | Sinónimos / variantes para canonización. |
-
-### 4.2 Funciones del módulo (orden de llamada)
-
-```text
-ejecutar_pipeline
-└── montar_drive
-└── procesar_anio
-    ├── leer_archivo_anio
-    │   └── _detectar_separador_y_codificacion
-    ├── normalizar_columnas
-    ├── construir_variables
-    │   ├── construir_periodo_ia
-    │   ├── construir_puntaje_generico
-    │   ├── construir_edad
-    │   ├── construir_estrato
-    │   ├── construir_genero
-    │   ├── construir_nivel_educ_padre
-    │   ├── construir_estu_trabaja
-    │   ├── construir_cabeza_familia
-    │   ├── construir_jornada
-    │   ├── construir_internet
-    │   ├── construir_area_residencia
-    │   ├── construir_naturaleza_ies
-    │   ├── construir_departamento
-    │   └── construir_distancia_bogota
-    ├── seleccionar_variables_finales
-    └── limpiar_dataframe
-└── consolidar
-└── persistir
+```
+python/
+├── preparar_datos.py          # módulo 1: limpieza y construcción de variables
+├── analisis_descriptivo.py    # módulo 2: Parte 1 (Tabla 3 + figuras)
+├── regresion_mco.py           # módulo 3: Parte 2 (18 modelos MCO)
+├── main.py                    # orquestador
+└── (notebooks históricos)     # 00_*.ipynb … 05_*.ipynb (versión previa)
+docs/
+├── DOCUMENTACION_TECNICA.md   # este documento
+└── GUIA_EDUCATIVA.md          # glosario didáctico del código
 ```
 
----
+Cada módulo expone:
 
-## 5. Variables conservadas en el dataframe final
-
-| # | Variable | Tipo | Origen / Construcción |
-|--:|---|---|---|
-| 1 | `id_estudiante` | string | `ESTU_CONSECUTIVO` |
-| 2 | `anio` | int | Año del archivo |
-| 3–7 | `punt_lectura_critica`, `punt_razona_cuant`, `punt_competen_ciud`, `punt_comuni_escrita`, `punt_ingles` | float | Módulos genéricos ICFES (0–300) |
-| 8 | `puntaje_saberpro_generico` | float | Promedio simple de los 5 módulos |
-| 9 | `periodo_ia` | 0/1 | 0 si `anio` ∈ {2021,2022}; 1 si {2023,2024} |
-| 10 | `estrato` | 1–6 | `FAMI_ESTRATOVIVIENDA` |
-| 11 | `genero` | 0/1 | `ESTU_GENERO` (F=0, M=1) |
-| 12 | `edad` | float | `anio` – año de `ESTU_FECHANACIMIENTO` |
-| 13 | `nivel_educ_padre` | 1–7 | `FAMI_EDUCACIONPADRE` |
-| 14 | `estu_trabaja` | 0/1 | `ESTU_HORASSEMANATRABAJA` |
-| 15 | `estu_cabeza_familia` | 0/1 | Proxy desde `ESTU_PAGOMATRICULAPADRES` |
-| 16 | `jornada` | 0/1 | `ESTU_HORARIO_PRGM` + `ESTU_METODO_PRGM` |
-| 17 | `internet` | 0/1 | `FAMI_TIENEINTERNET` |
-| 18 | `area_residencia` | 0/1 | `ESTU_AREARESIDE` |
-| 19 | `naturaleza_ies` | 0/1 | `INST_ORIGEN` |
-| 20 | `departamento` | 0–32 | Canonización de `INST_DEPARTAMENTO_NOMBRE` |
-| 21 | `departamento_nombre` | string | Nombre canónico (auditoría) |
-| 22 | `distancia_bogota_km` | float | Lookup `DEPARTAMENTOS[nombre]` |
-
-Todas las demás columnas del archivo crudo se descartan en
-`seleccionar_variables_finales`.
+- Un conjunto de **constantes** públicas (en MAYÚSCULAS).
+- Funciones reutilizables documentadas (`construir_*`,
+  `estimar_modelo`, `figura_*`, etc.).
+- Un punto de entrada (`ejecutar_pipeline` /
+  `ejecutar_analisis_descriptivo` / `ejecutar_regresion`).
+- Una interfaz de línea de comandos vía `argparse`.
 
 ---
 
-## 6. Reglas de limpieza aplicadas
+## 4. Dependencias
 
-1. **Conversión numérica defensiva**: cualquier columna que represente
-   puntajes, edad o distancia se pasa por `pd.to_numeric` con
-   `errors='coerce'`. Las celdas no convertibles quedan `NaN`.
-2. **Rango Saber Pro 0–300**: los valores fuera del rango oficial se
-   convierten a `NaN` (no se eliminan filas completas por un módulo).
-3. **Filtro de filas inválidas**:
-   - sin `puntaje_saberpro_generico` (no hay variable dependiente),
-   - sin `departamento` válido (no hay anclaje geográfico).
-4. **Edad**: se descartan edades < 15 o > 80 años (errores de captura).
-5. **Estrato**: sólo se aceptan códigos 1–6; "Sin estrato" → `NaN`.
-6. **Duplicados**: se eliminan duplicados exactos por
-   (`id_estudiante`, `anio`).
-7. **Esquema constante**: si un archivo no trae una columna fuente, se
-   crea con `NaN` para que todos los `df_<año>` tengan el mismo conjunto
-   de columnas en el mismo orden.
+| Paquete         | Versión recomendada | Usado por |
+|-----------------|---------------------|-----------|
+| Python          | ≥ 3.10              | Todos. |
+| `pandas`        | ≥ 1.5               | Todos. |
+| `numpy`         | ≥ 1.23              | Todos. |
+| `scipy`         | ≥ 1.10              | `analisis_descriptivo` (t, χ², MW), `regresion_mco` (Shapiro, KS). |
+| `statsmodels`   | ≥ 0.14              | `regresion_mco` (OLS, BP, RESET, VIF, DW, Holm, BH). |
+| `matplotlib`    | ≥ 3.5               | `analisis_descriptivo` (cuatro figuras). |
 
-El método `limpiar_dataframe` imprime el número de filas eliminadas
-para que el usuario tenga trazabilidad.
-
----
-
-## 7. Forma de ejecución
-
-### 7.1 Desde Google Colab (recomendado)
-
-```python
-# Celda 1 — cargar el script desde Drive
-!cp /content/drive/MyDrive/IA_EDUCACION_SUPERIOR/colab_pipeline.py /content/
-
-# Celda 2 — ejecutar
-from colab_pipeline import ejecutar_pipeline
-dfs_anio, df_consolidado = ejecutar_pipeline()
-
-df_2021 = dfs_anio[2021]
-df_2022 = dfs_anio[2022]
-df_2023 = dfs_anio[2023]
-df_2024 = dfs_anio[2024]
-df_consolidado.head()
-```
-
-### 7.2 Desde una máquina local
+Instalación rápida:
 
 ```bash
-python python/colab_pipeline.py
+pip install pandas numpy scipy statsmodels matplotlib
 ```
-
-> Requiere que `RUTA_PROYECTO_DEFECTO` se ajuste a una carpeta local
-> que contenga los `.txt`, o que se pase otra ruta a `ejecutar_pipeline`.
-
-### 7.3 Salida esperada en consola
-
-```
-[10:00:01] == INICIO DEL PIPELINE ==
-[10:00:01] Montando Google Drive en /content/drive ...
-[10:00:04] Ruta del proyecto verificada: /content/drive/MyDrive/IA_EDUCACION_SUPERIOR
-[10:00:04] -- Procesando año 2021 --
-[10:00:05] Leyendo Examen_Saber_Pro_Genericas_2021.txt (sep='¦', enc='latin-1') ...
-[10:00:18]   Examen_Saber_Pro_Genericas_2021.txt: 188,432 filas × 72 columnas.
-[10:00:25] Limpieza: 188,432 → 182,114 filas (eliminadas 6,318 = 3.4%).
-[10:00:25] df_2021 listo: 182,114 filas × 22 columnas.
-...
-[10:01:48] df_consolidado: 742,991 filas × 22 columnas.
-[10:01:50] Guardado: .../procesados/df_consolidado.csv
-[10:01:53] == FIN DEL PIPELINE ==
-```
-
-(Los volúmenes reales dependen del archivo descargado de DataICFES.)
 
 ---
 
-## 8. Trazabilidad con el documento de la investigación
+## 5. Módulo 1 — `preparar_datos.py`
 
-| Documento (sección) | Implementación en el script |
+### 5.1 Responsabilidad
+
+Cargar los `.txt` de DataICFES, leer **sólo las 19 columnas necesarias**
+del diccionario oficial, construir las variables del estudio con
+**drop incremental** (la columna cruda se elimina apenas se usa) y
+producir un dataframe por año (`df_2021…df_2024`) más el consolidado.
+
+### 5.2 Distinción Tabla 2 vs Tabla 3
+
+| Conjunto | Tabla del documento | Finalidad | Contenido |
+|---|---|---|---|
+| `VARIABLES_DESCRIPTIVO` | Tabla 3 | Análisis bivariado (Parte 1). | id, anio, periodo_ia, 5 puntajes + agregado, estrato, genero, estu_trabaja, internet, naturaleza_ies. |
+| `VARIABLES_MODELO` | Tabla 2 | Regresión MCO (Parte 2). | Todo lo anterior + edad, nivel_educ_padre, estu_cabeza_familia, jornada, area_residencia, departamento (0-32) + departamento_nombre, distancia_bogota_km, cod_ies, municipio_ies, tipo_municipio. |
+
+La unión (`VARIABLES_FINALES`, 25 columnas) es lo que el dataframe
+final conserva.
+
+### 5.3 Columnas leídas (diccionario DataICFES, sección 2)
+
+| Campo crudo | Variable producida | Conjunto |
+|---|---|---|
+| `estu_consecutivo` | `id_estudiante` | Ambos |
+| `mod_lectura_critica_punt` | `punt_lectura_critica` | Ambos |
+| `mod_razona_cuantitat_punt` | `punt_razona_cuant` | Ambos |
+| `mod_competen_ciudada_punt` | `punt_competen_ciud` | Ambos |
+| `mod_comuni_escrita_punt` | `punt_comuni_escrita` | Ambos |
+| `mod_ingles_punt` | `punt_ingles` | Ambos |
+| `estu_genero` | `genero` | Ambos |
+| `estu_fechanacimiento` | `edad` (luego se elimina) | Modelo |
+| `fami_estratovivienda` | `estrato` | Ambos |
+| `fami_educacionpadre` | `nivel_educ_padre` | Modelo |
+| `estu_horassemanatrabaja` | `estu_trabaja` | Ambos |
+| `estu_pagomatriculapadres` | `estu_cabeza_familia` (proxy) | Modelo |
+| `fami_tieneinternet` | `internet` | Ambos |
+| `estu_areareside` | `area_residencia` | Modelo |
+| `estu_metodo_prgm` | `jornada` (proxy) | Modelo |
+| `inst_origen` | `naturaleza_ies` | Ambos |
+| `inst_cod_institucion` | `cod_ies` | Aux. EF IES |
+| `estu_inst_departamento` | `departamento`, `departamento_nombre`, `distancia_bogota_km` | Modelo |
+| `estu_inst_municipio` | `municipio_ies`, `tipo_municipio` | Aux. EF mun. |
+
+### 5.4 Drop incremental de columnas
+
+| Paso | Función | Crea | Elimina |
+|----:|---|---|---|
+| 1 | `transformar_id_y_modulos` | id + 5 puntajes | (rename) |
+| 2 | `construir_periodo_ia` | `periodo_ia` | — |
+| 3 | `construir_puntaje_generico` | agregado | — |
+| 4 | `construir_edad` | `edad` | `estu_fechanacimiento` |
+| 5 | `construir_genero` | `genero` | `estu_genero` |
+| 6 | `construir_estrato` | `estrato` | `fami_estratovivienda` |
+| 7 | `construir_nivel_educ_padre` | `nivel_educ_padre` | `fami_educacionpadre` |
+| 8 | `construir_estu_trabaja` | `estu_trabaja` | `estu_horassemanatrabaja` |
+| 9 | `construir_cabeza_familia` | `estu_cabeza_familia` | `estu_pagomatriculapadres` |
+| 10 | `construir_jornada` | `jornada` | `estu_metodo_prgm` |
+| 11 | `construir_internet` | `internet` | `fami_tieneinternet` |
+| 12 | `construir_area_residencia` | `area_residencia` | `estu_areareside` |
+| 13 | `construir_naturaleza_ies` | `naturaleza_ies` | `inst_origen` |
+| 14 | `construir_departamento_y_distancia` | 3 vars geo | `estu_inst_departamento` |
+| 15 | `construir_identificadores_fe` | `cod_ies`, `municipio_ies` | (rename) |
+| 16 | `construir_tipo_municipio` | `tipo_municipio` | — (`municipio_ies` se conserva para EF) |
+
+### 5.5 Limpieza
+
+- Puntajes fuera de [0, 300] → `NaN`.
+- Edades fuera de [15, 80] → `NaN`.
+- Estratos fuera de [1, 6] → `NaN`.
+- Filas sin `puntaje_saberpro_generico` → eliminadas.
+- Filas sin `departamento` → eliminadas.
+- Duplicados por (`id_estudiante`, `anio`) → se conserva el primero.
+
+### 5.6 Ejecución
+
+```bash
+python python/preparar_datos.py --ruta /carpeta/con/los_txt
+```
+
+---
+
+## 6. Módulo 2 — `analisis_descriptivo.py`
+
+### 6.1 Responsabilidad
+
+Implementa la **Parte 1** (Sección 9 del documento): comparación
+bivariada entre las cohortes 2021–2022 y 2023–2024.
+
+### 6.2 Variables comparadas
+
+- **Continuas / ordinales (10):** los 5 módulos + `puntaje_saberpro_generico`,
+  `estrato`, `edad`, `nivel_educ_padre`, `distancia_bogota_km`. Se
+  reportan media, desviación, n y se aplican **t de Welch** (no asume
+  varianzas iguales) y **Mann–Whitney** (no paramétrica robusta).
+- **Dicotómicas (7):** `genero`, `estu_trabaja`, `estu_cabeza_familia`,
+  `jornada`, `internet`, `area_residencia`, `naturaleza_ies`. Se
+  reportan proporción por cohorte, diferencia en puntos porcentuales y
+  **χ² de Pearson** con corrección de Yates.
+
+### 6.3 Salidas
+
+| Archivo | Contenido |
 |---|---|
-| §8.2 — Fuente de datos: DataICFES | `leer_archivo_anio`, `PATRON_ARCHIVO` |
-| §8.3 — Variable dependiente: `puntaje_saberpro_generico` | `construir_puntaje_generico` |
-| §8.4 — Variable de interés: `periodo_ia` | `construir_periodo_ia` |
-| §8.5 — Controles socioeconómicos | `construir_estrato`, `construir_genero`, `construir_edad`, `construir_nivel_educ_padre`, `construir_estu_trabaja`, `construir_cabeza_familia`, `construir_jornada`, `construir_internet`, `construir_area_residencia`, `construir_naturaleza_ies` |
-| §8.5 (i) — Departamento 0–32, Bogotá D.C.=0 | `construir_departamento`, `DEPARTAMENTOS`, `ALIAS_DEPARTAMENTOS` |
-| §8.5 (ii) — `distancia_bogota_km` | `construir_distancia_bogota` |
-| Tabla 1 — Mapeo de departamentos y distancias | `DEPARTAMENTOS` |
-| Tabla 2 — Variables del modelo | `VARIABLES_FINALES` |
+| `procesados/resultados/tabla3_descriptivo.csv` | Tabla 3 completa. |
+| `procesados/resultados/tabla3_por_departamento.csv` | Medias × (depto × cohorte). |
+| `procesados/figuras/fig_boxplot_periodo.png` | Distribución por cohorte. |
+| `procesados/figuras/fig_boxplot_departamento.png` | Distribución por dpto. |
+| `procesados/figuras/fig_histograma_cohortes.png` | Histograma comparativo. |
+| `procesados/figuras/fig_dispersion_distancia.png` | Dispersión distancia ↔ puntaje. |
+
+### 6.4 Ejecución
+
+```bash
+python python/analisis_descriptivo.py --ruta /carpeta/con/procesados
+```
 
 ---
 
-## 9. Limitaciones del pipeline
+## 7. Módulo 3 — `regresion_mco.py`
 
-- El nombre exacto de los campos del ICFES puede cambiar entre años.
-  `MAPA_COLUMNAS` contempla las variantes documentadas en el diccionario
-  oficial pero pueden faltar nuevas. Si una columna no aparece, la
-  variable correspondiente quedará `NaN` (no aborta el pipeline).
-- `estu_cabeza_familia` es **un proxy** construido desde
-  `ESTU_PAGOMATRICULAPADRES`, tal como advierte la Tabla 2 del documento.
-- `jornada` depende de los campos de horario/metodología del programa.
-  Cuando el ICFES no reporta horario, queda `NaN`.
-- Las distancias a Bogotá son las publicadas por IGAC/INVIAS y, por
-  diseño metodológico (Sección 8.5 del documento), son una sola por
-  departamento; no capturan dispersión intra-departamental.
+### 7.1 Responsabilidad
+
+Implementa la **Parte 2** (Secciones 8 y 10 del documento): 6
+variables dependientes × 3 especificaciones = **18 modelos MCO**.
+
+### 7.2 Especificaciones
+
+| Spec | Términos en `X` | Notas |
+|---|---|---|
+| `base` | `periodo_ia` + dummies de `departamento` (Bogotá D.C. = referencia) + `distancia_bogota_km` + 10 controles. | Especificación principal. |
+| `ef_ies` | `periodo_ia` + EF por `cod_ies` + 10 controles. | `departamento` y `distancia` quedan absorbidos por la IES (cada IES está en un solo dpto.). |
+| `ef_mun` | base + EF por `tipo_municipio` (0=Bogotá, 1=capital, 2=resto). | Permite separar el efecto del tipo de municipio del efecto departamental. |
+
+Todos los modelos usan **errores estándar clusterizados por IES**
+(`cov_type='cluster'`, `cov_kwds={'groups': cod_ies}`).
+
+### 7.3 Triángulo de colinealidad geográfica
+
+Sobre `puntaje_saberpro_generico`, se reportan tres versiones (§10
+del documento):
+
+- (a) sólo `departamento`,
+- (b) sólo `distancia_bogota_km`,
+- (c) ambos (con VIF para diagnosticar colinealidad).
+
+### 7.4 Diagnósticos (Sección 8.10)
+
+Por cada uno de los 18 modelos se reporta:
+
+- **Normalidad de residuos:** Shapiro–Wilk si n < 5 000, KS en otro
+  caso.
+- **Homocedasticidad:** Breusch–Pagan.
+- **Autocorrelación:** Durbin–Watson.
+- **Especificación:** RESET de Ramsey.
+- **Multicolinealidad:** VIF (umbral > 10), sólo en Spec `base`.
+
+### 7.5 Corrección por pruebas múltiples (Sección 12)
+
+Sobre los 6 valores p de β_IA (uno por dependiente) **dentro de cada
+especificación**, se aplican:
+
+- **Holm** (control de FWER).
+- **Benjamini–Hochberg** (control de FDR).
+
+Las columnas `sig_5pct_holm` y `sig_5pct_bh` indican si el coeficiente
+sobrevive cada corrección.
+
+### 7.6 Salidas
+
+| Archivo | Contenido |
+|---|---|
+| `procesados/resultados/tabla4_coeficientes.csv` | Todos los coeficientes de los 18 modelos. |
+| `procesados/resultados/diagnosticos.csv` | Las 5 pruebas por modelo. |
+| `procesados/resultados/beta_ia_resumen.csv` | β_IA con p crudo, Holm y BH. |
+| `procesados/resultados/colinealidad_geografica.csv` | Triángulo (a)/(b)/(c). |
+
+### 7.7 Ejecución
+
+```bash
+python python/regresion_mco.py --ruta /carpeta/con/procesados
+```
 
 ---
 
-## 10. Mantenimiento
+## 8. Módulo 4 — `main.py`
 
-Para añadir un año nuevo basta con:
+Orquestador único que encadena los tres módulos.
 
-1. Subir `Examen_Saber_Pro_Genericas_<año>.txt` a la carpeta del proyecto.
-2. Agregar el año a la constante `ANIOS` y, según corresponda, a
-   `ANIOS_PREVIO` o `ANIOS_IA`.
-3. Volver a ejecutar `ejecutar_pipeline()`.
+```bash
+# Todo:
+python python/main.py --ruta /carpeta/con/los_txt
 
-Para añadir una variable de control:
+# Solo regresión, reusando `procesados/` existente:
+python python/main.py --ruta /carpeta --solo regresion
 
-1. Mapear el nombre crudo en `MAPA_COLUMNAS`.
-2. Implementar una función `construir_<nueva_variable>` siguiendo el
-   patrón del resto.
-3. Llamarla desde `construir_variables`.
-4. Añadir la columna al final de `VARIABLES_FINALES`.
+# Reanudar tras preparar_datos sin volver a ejecutarlo:
+python python/main.py --ruta /carpeta --saltar-preparar
+```
+
+---
+
+## 9. Trazabilidad con el documento
+
+| Documento | Implementación |
+|---|---|
+| §8.2 — Fuente DataICFES | `preparar_datos.COLS_REQUERIDAS` |
+| §8.3 — Variable dependiente | `construir_puntaje_generico` |
+| §8.4 — `periodo_ia` | `construir_periodo_ia` |
+| §8.5 — Controles | 10 funciones `construir_*` |
+| §8.5 (i) — Departamento 0–32 | `DEPARTAMENTOS`, `construir_departamento_y_distancia` |
+| §8.5 (ii) — `distancia_bogota_km` | `construir_departamento_y_distancia` |
+| §8.8 — Especificación del modelo | `regresion_mco._formula` |
+| §8.9 — EF IES y EF tipo de municipio | Specs `ef_ies` y `ef_mun` |
+| §8.10 — Diagnósticos | `regresion_mco.diagnosticos` |
+| §9 — Análisis bivariado | `analisis_descriptivo` (módulo completo) |
+| §10 — Triángulo de colinealidad | `regresion_mco.colinealidad_geografica` |
+| §12 — Corrección por pruebas múltiples | `regresion_mco.aplicar_correcciones` |
+| Tabla 1 | `DEPARTAMENTOS`, `CAPITALES` |
+| Tabla 2 | `VARIABLES_MODELO` |
+| Tabla 3 | `VARIABLES_DESCRIPTIVO`, `analisis_descriptivo.tabla3_descriptivo` |
+| Tabla 4 | `regresion_mco.tabla4_un_modelo` |
+
+---
+
+## 10. Estructura de archivos generados
+
+Después de una corrida completa:
+
+```
+<ruta_proyecto>/
+├── Examen_Saber_Pro_Genericas_2021.txt      (entrada)
+├── … 2022.txt … 2023.txt … 2024.txt
+└── procesados/
+    ├── df_2021.csv      (preparación)
+    ├── df_2022.csv
+    ├── df_2023.csv
+    ├── df_2024.csv
+    ├── df_consolidado.csv
+    ├── resultados/
+    │   ├── tabla3_descriptivo.csv          (Parte 1)
+    │   ├── tabla3_por_departamento.csv
+    │   ├── tabla4_coeficientes.csv         (Parte 2)
+    │   ├── diagnosticos.csv
+    │   ├── beta_ia_resumen.csv
+    │   └── colinealidad_geografica.csv
+    └── figuras/
+        ├── fig_boxplot_periodo.png
+        ├── fig_boxplot_departamento.png
+        ├── fig_histograma_cohortes.png
+        └── fig_dispersion_distancia.png
+```
+
+---
+
+## 11. Limitaciones del sistema
+
+- `estu_areareside` aparece marcada con `*` (pendiente por publicación)
+  para 2024 en el diccionario DataICFES; cuando falte, la variable
+  `area_residencia` queda `NaN`.
+- `estu_horario_prgm` no existe en 2021–2024 ⇒ `jornada` se aproxima
+  desde `estu_metodo_prgm` (no presencial = 1).
+- `estu_cabeza_familia` es proxy desde `estu_pagomatriculapadres`.
+- `tipo_municipio` se clasifica como Bogotá / capital de otro dpto. /
+  resto. No usa la tipología DANE detallada por categorías de Ley 617.
+- `distancia_bogota_km` es una sola distancia por departamento (Tabla 1
+  del documento); no captura dispersión intra-departamental.
+- En `ef_ies` los contrastes departamentales y la distancia quedan
+  absorbidos (cada IES está en un único departamento), tal como advierte
+  §8.9 del documento. Se reportan, pero su lectura geográfica corresponde
+  a las otras dos especificaciones.
+
+---
+
+## 12. Mantenimiento
+
+- **Añadir un año**: incluirlo en `ANIOS` y, según corresponda, en
+  `ANIOS_PREVIO` o `ANIOS_IA`. Colocar el `.txt` en la carpeta.
+- **Añadir una variable de control**: agregar el nombre crudo a
+  `COLS_REQUERIDAS`, implementar `construir_<nueva>` (con drop de la
+  fuente), llamarla desde `construir_todas_las_variables` y añadirla
+  a `VARIABLES_MODELO` y/o `VARIABLES_DESCRIPTIVO`. Para que entre
+  además al MCO, añadirla a `CONTROLES` en `regresion_mco.py`.
+- **Cambiar la lista de dependientes**: editar `DEPENDIENTES` en
+  `regresion_mco.py`.
+- **Otra corrección de pruebas múltiples**: pasar otro `method` a
+  `multipletests` (p. ej. `"bonferroni"`).
