@@ -1,103 +1,120 @@
-# Guía educativa — `preparar_datos.py`
+# Guía educativa del código
 
 Este documento explica, con propósito didáctico, **cada elemento real
-del código** del script `python/preparar_datos.py`: palabras
-reservadas, instrucciones, funciones, estructuras, librerías,
-variables, parámetros y conceptos. Los comentarios del script no se
-analizan; el foco está en lo que efectivamente ejecuta el intérprete.
+del código** de los cuatro módulos del proyecto:
 
-> El orden de las secciones sigue el orden en que aparecen los
-> elementos en el archivo. Si algo se repite, se explica la primera vez
-> y después se mencionan solo los matices nuevos.
+- `python/preparar_datos.py` — preparación de microdatos.
+- `python/analisis_descriptivo.py` — Parte 1 (bivariado).
+- `python/regresion_mco.py` — Parte 2 (regresión MCO).
+- `python/main.py` — orquestador.
+
+> Sólo se analiza lo que el intérprete realmente ejecuta: palabras
+> reservadas, instrucciones, funciones, estructuras, librerías,
+> variables, parámetros y conceptos. Los comentarios del script no se
+> incluyen como objeto de análisis.
 
 ---
 
-## 0. Cabecera del archivo
+## Parte A — Conceptos transversales
+
+Los cuatro módulos comparten varios elementos. Se explican una sola
+vez aquí y se reutilizan en las secciones específicas.
+
+### A.1 Cabecera y anotaciones
 
 ```python
 from __future__ import annotations
 ```
 
-- **`from … import …`** — importa nombres específicos de un módulo
-  sin traer todo el módulo al espacio de nombres.
-- **`__future__`** — módulo estándar que expone funcionalidades del
-  lenguaje que pasarán a ser el comportamiento predeterminado.
+- **`from … import …`** — importa nombres concretos de un módulo.
+- **`__future__`** — módulo estándar que expone funcionalidades futuras
+  del lenguaje.
 - **`annotations`** — hace que las anotaciones de tipo (`: str`,
-  `-> int`, etc.) se evalúen de forma **diferida**, como cadenas. Permite
-  que el script funcione aunque alguna anotación referencie una clase
-  declarada más abajo, sin coste en tiempo de ejecución.
+  `-> int`) se evalúen como cadenas (de forma **diferida**), sin coste
+  en tiempo de ejecución.
 
-### Importaciones estándar
+### A.2 Librerías de la *standard library*
+
+| Importación | Para qué se usa en el proyecto |
+|---|---|
+| `import os` | Rutas (`os.path.join`, `os.path.isfile`, `os.path.isdir`, `os.makedirs`). |
+| `import re` | Expresiones regulares (extraer un dígito, colapsar espacios). |
+| `import sys` | Detectar entorno (`"google.colab" in sys.modules`). |
+| `import argparse` | Construcción de la CLI (banderas y argumentos). |
+| `import unicodedata` | Descomposición de acentos (NFKD + filtro de marcas combinantes). |
+| `from datetime import datetime` | Hora actual para los logs. |
+| `from typing import Dict, Iterable, List, Optional, Tuple` | Anotaciones de tipo. |
+| `import warnings` | Suprimir avisos durante la regresión. |
+
+### A.3 Librerías de terceros
+
+| Importación | Para qué se usa |
+|---|---|
+| `import numpy as np` | Arreglos, `np.nan`, `np.where`, `np.polyfit`. |
+| `import pandas as pd` | `DataFrame`, `Series`, I/O CSV, `groupby`, `pivot_table`. |
+| `from scipy import stats` | Pruebas de hipótesis (`ttest_ind`, `mannwhitneyu`, `chi2_contingency`, `shapiro`, `kstest`). |
+| `import statsmodels.api as sm` | OLS de bajo nivel, `add_constant`. |
+| `import statsmodels.formula.api as smf` | OLS con fórmulas tipo R (patsy). |
+| `from statsmodels.stats.diagnostic import het_breuschpagan, linear_reset` | Diagnósticos de heterocedasticidad y especificación. |
+| `from statsmodels.stats.outliers_influence import variance_inflation_factor` | VIF. |
+| `from statsmodels.stats.stattools import durbin_watson` | Durbin-Watson. |
+| `from statsmodels.stats.multitest import multipletests` | Holm y Benjamini-Hochberg. |
+| `import matplotlib` y `matplotlib.pyplot as plt` | Figuras (boxplot, histograma, scatter). |
+
+### A.4 Operadores y construcciones recurrentes
+
+| Construcción | Significado |
+|---|---|
+| `:` en variables (`x: int`) | Anotación de tipo. |
+| `=` | Asignación. |
+| `==`, `!=`, `<`, `<=`, `>`, `>=` | Comparaciones. |
+| `and`, `or`, `not` | Booleanos escalares. |
+| `&`, `\|`, `~` | Booleanos vectoriales (numpy/pandas). |
+| `if … else …` | Expresión condicional (ternario). |
+| `for … in …` | Bucle iterativo. |
+| `lambda x: …` | Función anónima. |
+| `def f(...): ...` | Definición de función. |
+| `return`, `raise`, `continue`, `pass` | Sentencias de control. |
+| `try / except` | Manejo de excepciones. |
+| `f"…"` | Cadena formateada (interpolación con `{ }`). |
+| `r"…"` | *Raw string* (no interpreta `\n`, útil para regex). |
+| `[a, b]`, `(a, b)`, `{k: v}` | Literales de lista, tupla y diccionario. |
+| `[x for x in y if cond]` | Comprensión de lista. |
+| `{k: v for k, v in z.items()}` | Comprensión de diccionario. |
+| `_` | Identificador convencional "valor irrelevante". |
+| `*` en `from x import *` o `[*a, *b]` | Desempaquetado / unpack. |
+| `__name__` | Variable especial; vale `"__main__"` al ejecutar el archivo directamente. |
+| `pd.NA`, `np.nan`, `None`, `NaT` | Representaciones de "faltante". |
+
+### A.5 Logger compartido `_registrar`
+
+Definido en `preparar_datos.py` y reutilizado por los demás módulos:
 
 ```python
-import argparse
-import os
-import re
-import sys
-import unicodedata
-from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Tuple
+def _registrar(mensaje: str) -> None:
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {mensaje}")
 ```
 
-- **`argparse`** — librería estándar para construir interfaces de línea
-  de comandos. Aquí define `--ruta`, `--anios`, `--sin-guardar`.
-- **`os`** — utilidades del sistema operativo: unir rutas
-  (`os.path.join`), comprobar existencia (`os.path.isfile`,
-  `os.path.isdir`), crear carpetas (`os.makedirs`).
-- **`re`** — expresiones regulares. Aquí se usa para capturar el primer
-  dígito ("Estrato 3" → 3) y para colapsar espacios duplicados.
-- **`sys`** — parámetros del intérprete; aquí sirve para detectar si
-  `google.colab` está en `sys.modules`.
-- **`unicodedata`** — normalización Unicode. `NFKD` descompone caracteres
-  acentuados; `combining` identifica las marcas combinantes (tildes).
-- **`from datetime import datetime`** — la clase `datetime` permite
-  obtener la hora actual con `.now()` y formatearla con `.strftime`.
-- **`from typing import …`** — anotaciones de tipo:
-  - `Dict[K, V]` → diccionario con claves K y valores V.
-  - `List[T]` → lista homogénea de tipo T.
-  - `Tuple[A, B]` → tupla de longitud fija con tipos por posición.
-  - `Optional[T]` → equivalente a `Union[T, None]`.
-  - `Iterable[T]` → cualquier objeto que pueda recorrerse con `for`.
-
-### Importaciones de terceros
-
-```python
-import numpy as np
-import pandas as pd
-```
-
-- **`numpy`** (alias `np`) — biblioteca numérica. Aporta `np.nan`
-  (centinela flotante para valores faltantes), arrays vectoriales y
-  operaciones como `np.where(cond, si, no)`.
-- **`pandas`** (alias `pd`) — librería de análisis tabular. Las clases
-  principales son:
-  - **`DataFrame`** — tabla 2D (filas × columnas) con un índice.
-  - **`Series`** — columna 1D con un índice asociado.
-- **`as np` / `as pd`** — alias idiomáticos para acortar el nombre.
+- **`-> None`** — no retorna nada explícitamente.
+- **`datetime.now().strftime(...)`** — formato `HH:MM:SS`.
+- **`f"…{var}…"`** — interpolación.
 
 ---
 
-## 1. Constantes (Bloque 1)
+## Parte B — Módulo `preparar_datos.py`
 
-### Anotación de tipo en variables
+### B.1 Constantes
 
 ```python
 PATRON_ARCHIVO: str = "Examen_Saber_Pro_Genericas_{anio}.txt"
 ANIOS: List[int] = [2021, 2022, 2023, 2024]
 ```
 
-- **`: str` / `: List[int]`** — declaración de tipo. No es obligatoria
-  en tiempo de ejecución pero ayuda al editor y a los linters.
-- Cuando una variable se escribe en MAYÚSCULAS, la convención indica
-  que es una **constante** (Python no tiene `const`).
-- **Cadenas (`str`)** — secuencias de caracteres entre comillas. Aquí
-  se usa el método `.format(anio=…)` para sustituir `{anio}`.
-- **Listas (`list`)** — secuencias mutables ordenadas entre `[ ]`.
-- **Tuplas (`tuple`)** — secuencias inmutables entre `( )`. Se usan en
-  `SEPARADORES_CANDIDATOS` y `CODIFICACIONES_CANDIDATAS` para señalar
-  que el orden importa y el contenido no se modificará.
+- **`: str`, `: List[int]`** — anotaciones de tipo.
+- Convención: nombres en MAYÚSCULAS marcan constantes.
+- **`.format(anio=2021)`** — método de cadenas que sustituye `{anio}`.
 
-### Diccionarios
+### B.2 Diccionarios con tuplas como valor
 
 ```python
 DEPARTAMENTOS: Dict[str, Tuple[int, float]] = {
@@ -107,15 +124,15 @@ DEPARTAMENTOS: Dict[str, Tuple[int, float]] = {
 }
 ```
 
-- **Diccionario (`dict`)** — colección de pares clave→valor entre `{ }`.
-- **Tupla como valor** — cada entrada agrupa dos atributos del
-  departamento (código numérico y distancia oficial a Bogotá), de modo
-  que se reutiliza el diccionario para generar dos columnas distintas.
-- **Acceso**: `DEPARTAMENTOS["BOGOTA"]` devuelve `(0, 0.0)`. Iterar el
-  diccionario produce sus claves; `.items()` produce pares
-  `(clave, valor)`; `.values()` produce sólo los valores.
+- **`Dict[K, V]`** — anotación: claves K, valores V.
+- **`Tuple[int, float]`** — tupla de dos elementos con tipos por
+  posición.
+- Acceso: `DEPARTAMENTOS["BOGOTA"]` devuelve la tupla.
+- **`.items()`** — itera pares `(clave, valor)`.
+- **`for n, (c, _) in DEPARTAMENTOS.items()`** — desempaqueta la tupla;
+  `_` es el "valor que no me interesa".
 
-### Listas derivadas con suma
+### B.3 Comprensiones derivadas
 
 ```python
 VARIABLES_FINALES = (
@@ -124,431 +141,657 @@ VARIABLES_FINALES = (
 )
 ```
 
-- **`+` en listas** — concatena. La expresión construye la unión
-  ordenada: las columnas comunes aparecen una sola vez.
-- **Comprensión de lista** — `[c for c in X if cond]` genera una lista
-  nueva filtrada y/o transformada en una sola línea.
+- **`+` entre listas** — concatena.
+- **Comprensión de lista** — `[c for c in y if cond]` genera una lista
+  filtrada. El resultado es la unión ordenada de los dos conjuntos.
 
----
+### B.4 Función `_normalizar_texto(valor)`
 
-## 2. Utilidades (Bloque 2)
+```python
+def _normalizar_texto(valor: object) -> str:
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return ""
+    texto = str(valor).strip().upper()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", texto)
+```
 
-### `def _normalizar_texto(valor: object) -> str:`
-
-- **`def`** — palabra reservada para definir una función.
-- **`_` inicial** — convención: la función es privada del módulo
-  (no forma parte de la API pública).
-- **`valor: object`** — el parámetro acepta cualquier objeto, porque
-  `object` es la clase base de Python.
-- **`-> str`** — anota que la función devuelve una cadena.
-- **`pd.isna(valor)`** — detecta valores faltantes (`None`, `np.nan`,
-  `pd.NA`, `NaT`).
+- **`pd.isna(valor)`** — `True` para faltantes en cualquier
+  representación.
 - **`str(valor)`** — convierte cualquier objeto a cadena.
-- **`.strip()`** — quita espacios al inicio y final.
-- **`.upper()`** — pasa a mayúsculas.
+- **`.strip()` / `.upper()`** — quita espacios bordes / mayúsculas.
 - **`unicodedata.normalize("NFKD", texto)`** — descompone caracteres
-  acentuados (`'á' → 'a'` + tilde combinante separada).
-- **`unicodedata.combining(c)`** — devuelve > 0 si `c` es una marca
-  combinante; permite filtrarlas en el `"".join(...)`.
-- **`"".join(generator)`** — concatena los elementos del generador
-  usando `""` como separador.
-- **`re.sub(r"\s+", " ", texto)`** — sustituye una o más apariciones de
-  espacios en blanco por un único espacio. El prefijo `r` indica raw
-  string (no se interpretan secuencias de escape).
+  acentuados.
+- **`unicodedata.combining(c)`** — > 0 si `c` es una tilde combinante.
+- **`"".join(generator)`** — concatena los elementos de un generador.
+- **`re.sub(r"\s+", " ", texto)`** — sustituye uno o más blancos por uno
+  solo.
 
-### `def _registrar(mensaje: str) -> None:`
+### B.5 Función `_a_numerico(serie)`
 
-- **`-> None`** — la función no retorna ningún valor explícito.
-- **`datetime.now()`** — instancia con la fecha/hora actual.
-- **`.strftime("%H:%M:%S")`** — formatea como `HH:MM:SS`.
-- **`f"[{ahora}] {mensaje}"`** — *f-string*: literal con interpolación;
-  cada expresión entre `{ }` se evalúa.
-- **`print(...)`** — función incorporada que escribe en `stdout`.
+- **`serie.dtype.kind`** — un carácter que codifica el tipo:
+  `i` entero, `u` entero sin signo, `f` flotante.
+- **`x in "iuf"`** — pertenencia de carácter en una cadena.
+- **`.astype(str)`** — castea a cadena para usar `.str.*`.
+- **`.str.replace(",", ".", regex=False)`** — sustitución literal.
+- **`pd.to_numeric(s, errors="coerce")`** — convierte a número; los
+  fallos se vuelven `NaN`.
 
-### `def _a_numerico(serie: pd.Series) -> pd.Series:`
+### B.6 Conexión opcional con Google Drive
 
-- **`serie.dtype.kind in "iuf"`** — `dtype.kind` es un carácter que
-  resume el tipo: `i` entero, `u` entero sin signo, `f` flotante. El
-  operador `in` busca el carácter dentro de la cadena `"iuf"`.
-- **`serie.astype(str)`** — castea a cadena para usar métodos
-  vectoriales de texto.
-- **`.str.replace(",", ".", regex=False)`** — reemplaza coma decimal
-  (formato latino) por punto. `regex=False` trata los argumentos como
-  literales.
-- **`pd.to_numeric(..., errors="coerce")`** — convierte a número;
-  cualquier valor no convertible se vuelve `NaN`.
+```python
+def montar_drive_si_aplica(punto_montaje: str = "/content/drive") -> bool:
+    if "google.colab" not in sys.modules and not os.path.exists("/content"):
+        return False
+    try:
+        from google.colab import drive  # type: ignore
+    except ImportError:
+        return False
+    if not os.path.ismount(punto_montaje):
+        drive.mount(punto_montaje, force_remount=False)
+    return True
+```
 
----
+- **`try / except ImportError`** — manejo controlado de import opcional.
+- **Lazy import** — `from google.colab import drive` dentro de la
+  función, no en la cabecera.
+- **`os.path.ismount(...)`** — `True` si la ruta es un punto de montaje.
 
-## 3. Conexión opcional con Google Drive (Bloque 3)
+### B.7 Lectura robusta
 
-### `def montar_drive_si_aplica(punto_montaje: str = "/content/drive") -> bool:`
+```python
+def _detectar_formato(ruta: str) -> Tuple[str, str]:
+    for codificacion in CODIFICACIONES_CANDIDATAS:
+        for separador in SEPARADORES_CANDIDATOS:
+            try:
+                muestra = pd.read_csv(ruta, sep=separador,
+                                      encoding=codificacion,
+                                      nrows=5, on_bad_lines="skip",
+                                      engine="python")
+            except (UnicodeDecodeError, pd.errors.ParserError):
+                continue
+            if muestra.shape[1] > 1:
+                return separador, codificacion
+    raise ValueError(...)
+```
 
-- **Parámetro con valor por defecto** — `punto_montaje` toma
-  `/content/drive` si no se pasa argumento.
-- **`"google.colab" not in sys.modules`** — el operador `in` aquí
-  consulta si el módulo está cargado.
-- **`os.path.exists(...)`** — comprueba si una ruta existe.
-- **`try / except ImportError`** — manejo controlado: si el import
-  falla, devuelve `False` en vez de lanzar excepción.
-- **`from google.colab import drive`** dentro de la función — *lazy
-  import*: sólo se intenta cuando se ejecuta, no al cargar el módulo.
-- **`os.path.ismount(...)`** — devuelve `True` si la ruta es un punto de
-  montaje.
-- **`drive.mount(punto_montaje, force_remount=False)`** — monta el
-  Drive del usuario. `force_remount=False` evita re-pedir autorización.
-- **`return True / return False`** — finalizan la función y devuelven
-  ese valor al *caller*.
+- **Bucle anidado** — prueba todas las combinaciones de encoding y
+  separador.
+- **`try / except (Tipo1, Tipo2):`** — captura dos tipos con una sola
+  cláusula.
+- **`pd.read_csv` con `nrows=5`** — lee una muestra pequeña.
+- **`muestra.shape[1]`** — número de columnas; `shape[0]` filas.
+- **`return a, b`** — retorno múltiple via tupla implícita.
+- **`raise ValueError(...)`** — lanza excepción.
 
----
+### B.8 Lectura con `usecols`
 
-## 4. Lectura (Bloque 4)
+```python
+mapa_lower = {c.lower(): c for c in cols_archivo}
+usecols = [mapa_lower[c] for c in COLS_REQUERIDAS if c in mapa_lower]
+df = pd.read_csv(ruta, sep=sep, encoding=enc, usecols=usecols, ...)
+df.columns = [c.lower() for c in df.columns]
+df["anio"] = anio
+```
 
-### `def _detectar_formato(ruta: str) -> Tuple[str, str]:`
+- **Comprensión de diccionario** — `{c.lower(): c for c in ...}`.
+- **`usecols=[...]`** — `pd.read_csv` carga **solo** esas columnas
+  (ahorro de memoria sustancial con archivos grandes).
+- **Asignar lista a `df.columns`** — reemplaza los nombres si la
+  longitud coincide.
+- **`df["anio"] = anio`** — crea una columna nueva con valor constante
+  difundido a todas las filas.
 
-- **Bucle anidado** — `for codificacion in …: for separador in …:`
-  prueba cada combinación de encoding y separador.
-- **`try / except (UnicodeDecodeError, pd.errors.ParserError):`** —
-  captura dos tipos de error con una sola cláusula.
-- **`pd.read_csv(...)`** — lectura de archivos delimitados. Parámetros
-  usados aquí:
-  - `sep` — carácter delimitador.
-  - `encoding` — codificación del archivo.
-  - `nrows=5` — sólo cinco filas para sondear estructura.
-  - `on_bad_lines="skip"` — ignora filas mal formadas.
-  - `engine="python"` — motor más flexible.
-- **`muestra.shape[1]`** — número de columnas. `shape[0]` filas.
-- **`continue`** — salta a la siguiente iteración del bucle interno.
-- **`return separador, codificacion`** — retorno múltiple usando una
-  tupla implícita.
-- **`raise ValueError(...)`** — lanza una excepción; detiene la
-  ejecución si ninguna combinación funcionó.
+### B.9 Patrón de drop incremental
 
-### `def _leer_columnas_disponibles(ruta, sep, enc) -> List[str]:`
-
-- **`pd.read_csv(..., nrows=0)`** — lee cero filas; sólo trae la
-  cabecera. Es una técnica común para inspeccionar columnas sin gasto
-  de memoria.
-- **`list(...)`** — convierte el objeto `Index` de pandas a lista.
-
-### `def leer_archivo_anio(ruta_proyecto: str, anio: int) -> pd.DataFrame:`
-
-- **`PATRON_ARCHIVO.format(anio=anio)`** — sustituye `{anio}` en la
-  plantilla.
-- **`os.path.join(...)`** — concatena partes de ruta con el separador
-  correcto del sistema operativo.
-- **`os.path.isfile(...)`** — comprueba existencia del archivo.
-- **Comprensión de diccionario**
-  ```python
-  mapa_lower = {c.lower(): c for c in cols_archivo}
-  ```
-  Construye un diccionario "lowercase → nombre original".
-- **`usecols = [mapa_lower[c] for c in COLS_REQUERIDAS if c in mapa_lower]`**
-  Comprensión de lista filtrada: solo conserva las columnas que el
-  archivo trae realmente.
-- **`pd.read_csv(..., usecols=usecols)`** — carga **solo** esas
-  columnas; ahorra mucha memoria con los archivos grandes del ICFES.
-- **`df.columns = [c.lower() for c in df.columns]`** — reasigna el
-  índice de columnas con todos los nombres en minúsculas. Pandas acepta
-  asignar una lista al atributo `columns` mientras tenga la misma
-  longitud.
-- **`df["anio"] = anio`** — crea una columna nueva con valor constante.
-- **`for col in COLS_REQUERIDAS: if col not in df.columns: df[col] = np.nan`**
-  Garantiza esquema constante entre años (si una columna falta, queda
-  como `NaN`).
-- **`f"{len(df):,}"`** — formato con separador de miles.
-
----
-
-## 5. Construcción de variables (Bloque 5)
-
-### Patrón general
+Cada función `construir_*` sigue la misma forma:
 
 ```python
 def construir_X(df: pd.DataFrame) -> pd.DataFrame:
-    ... # construir df["nueva_variable"]
+    df["nueva"] = transformacion(df["columna_cruda"])
     df = df.drop(columns=["columna_cruda"])
     return df
 ```
 
 - **`df.drop(columns=[...])`** — devuelve un dataframe sin esas
-  columnas. La reasignación `df = df.drop(...)` reemplaza la referencia
-  local pero **no** modifica el original del *caller*: cuando la
-  función retorna `df`, el caller debe asignar el resultado para
-  conservarlo.
+  columnas. La reasignación `df = df.drop(...)` cambia la referencia
+  local; el caller recibe el resultado retornado.
 
-### `def transformar_id_y_modulos(df) -> df:`
+### B.10 `construir_edad` paso a paso
 
-- **`df.rename(columns=renombres)`** — devuelve un dataframe con las
-  columnas renombradas según el diccionario `renombres`.
-- **Bucle `for col in MODULOS_GENERICOS: df[col] = _a_numerico(df[col])`** —
-  convierte los puntajes a numérico.
+```python
+fecha = pd.to_datetime(df["estu_fechanacimiento"], errors="coerce", dayfirst=True)
+df["edad"] = (df["anio"] - fecha.dt.year).astype("Float64")
+df.loc[(df["edad"] < 15) | (df["edad"] > 80), "edad"] = np.nan
+df = df.drop(columns=["estu_fechanacimiento"])
+```
 
-### `def construir_periodo_ia(df) -> df:`
+- **`pd.to_datetime(..., errors="coerce", dayfirst=True)`** — convierte
+  a `Timestamp`. `coerce` deja `NaT` cuando falla; `dayfirst` interpreta
+  `DD/MM/AAAA`.
+- **`fecha.dt.year`** — accessor `.dt` sobre fechas; extrae el año.
+- **Resta vectorial** entre columnas.
+- **`.astype("Float64")`** — flotante **nullable** (admite `pd.NA`).
+- **`df.loc[mascara, columna] = valor`** — asignación selectiva por
+  máscara booleana.
+- **`|`** — OR vectorial (paréntesis obligatorios por precedencia).
 
-- **`df["anio"].apply(func)`** — aplica `func` elemento a elemento de la
-  `Series`.
-- **`lambda a: 0 if a in ANIOS_PREVIO else (1 if a in ANIOS_IA else np.nan)`**
-  — función anónima con dos expresiones condicionales anidadas.
-- **`.astype("Int64")`** — tipo entero **nullable** (admite `pd.NA`).
-  Útil para variables binarias con posibles ausentes.
+### B.11 `.map(diccionario)`
 
-### `def construir_puntaje_generico(df) -> df:`
+```python
+df["genero"] = norm.map({"F": 0, "FEMENINO": 0,
+                         "M": 1, "MASCULINO": 1}).astype("Int64")
+```
 
-- **`df[MODULOS_GENERICOS].mean(axis=1, skipna=True)`** — promedio
-  por **fila** (`axis=1`) ignorando `NaN`.
+- **`Series.map(dict)`** — traduce cada valor; los no-encontrados
+  → `NaN`.
+- **`.astype("Int64")`** — entero **nullable**.
 
-### `def construir_edad(df) -> df:`  (calcular edad + drop fuente)
+### B.12 `np.where` anidado
 
-- **`pd.to_datetime(serie, errors="coerce", dayfirst=True)`** —
-  convierte a fecha (`Timestamp`); valores no parseables → `NaT`.
-  `dayfirst=True` interpreta `DD/MM/AAAA`.
-- **`fecha.dt.year`** — accessor `dt` para operaciones de fecha;
-  extrae el año.
-- **`df["anio"] - fecha.dt.year`** — resta vectorial elemento a
-  elemento; el resultado es una `Series`.
-- **`.astype("Float64")`** — flotante nullable.
-- **Indexación booleana con `df.loc`**
-  ```python
-  df.loc[(df["edad"] < 15) | (df["edad"] > 80), "edad"] = np.nan
-  ```
-  - `df.loc[filas, columna]` permite asignación selectiva.
-  - **`|`** es OR booleano **vectorial**; los paréntesis son obligatorios
-    por precedencia (el operador `|` tiene menos precedencia que `<`/`>`).
-- **`df.drop(columns=["estu_fechanacimiento"])`** — al terminar, la
-  columna fuente desaparece del dataframe.
+```python
+df["jornada"] = np.where(
+    norm.str.contains("DISTANCIA|VIRTUAL", regex=True), 1,
+    np.where(norm.str.contains("PRESENCIAL"), 0, np.nan),
+)
+```
 
-### Funciones `construir_*` basadas en `.map(diccionario)`
+- **`np.where(cond, si, no)`** — equivalente vectorial del ternario.
+- **Anidado** — modela tres estados (1 / 0 / NaN).
+- **`serie.str.contains(patron, regex=True)`** — máscara booleana con
+  regex.
 
-- **`serie.apply(_normalizar_texto)`** — normaliza cada celda (mayúsculas,
-  sin acentos, espacios simples).
-- **`serie.map({clave: valor, ...})`** — traduce cada valor según el
-  diccionario; los valores no encontrados quedan `NaN`. Es el patrón
-  usado en `construir_genero`, `construir_nivel_educ_padre`,
-  `construir_estu_trabaja`, `construir_cabeza_familia`,
-  `construir_internet`.
+### B.13 `_canonizar_departamento`
 
-### `def construir_estrato(df) -> df:`
+Tres niveles de coincidencia:
 
-- **`serie.str.extract(r"(\d)", expand=False)`** — aplica una expresión
-  regular con un grupo de captura. Devuelve la primera coincidencia.
-  `expand=False` retorna una `Series`; con `expand=True` daría un
-  `DataFrame`.
-- **`extraido.where(extraido.between(1, 6))`** — conserva los valores
-  donde la condición es verdadera; los demás pasan a `NaN`.
+```python
+if texto in ALIAS_DEPARTAMENTOS: return ALIAS_DEPARTAMENTOS[texto]
+if texto in DEPARTAMENTOS: return texto
+for canon in DEPARTAMENTOS:
+    if texto.startswith(canon) or canon in texto:
+        return canon
+return None
+```
 
-### `def construir_jornada(df) -> df:`
+- **`for canon in DEPARTAMENTOS:`** — iterar un dict produce sus claves
+  (en orden de inserción desde Python 3.7).
+- **`startswith`, `in`** — pruebas de subcadenas.
 
-- **`np.where(condicion, valor_si, valor_no)`** — equivalente vectorial
-  del operador ternario.
-- **`np.where` anidado** — para manejar tres estados (1 / 0 / NaN).
-- **`serie.str.contains("PATRON|OTRO", regex=True)`** — máscara booleana
-  con regex. El carácter `|` dentro del patrón es OR de regex (no el OR
-  booleano de pandas).
-- **`pd.array(..., dtype="Float64").astype("Int64")`** — pasa por un
-  flotante nullable para luego convertirlo a entero nullable, evitando
-  errores al castear `NaN` a `int`.
+### B.14 Limpieza
 
-### `def construir_area_residencia(df) -> df:`
+```python
+fuera = ~df[col].between(0, 300)
+df.loc[fuera & df[col].notna(), col] = np.nan
+df = df[df["puntaje_saberpro_generico"].notna()].copy()
+df = df.drop_duplicates(subset=["id_estudiante", "anio"], keep="first")
+df = df.reset_index(drop=True)
+```
 
-- Misma técnica que `construir_jornada`. Reconoce "CABECERA" o "URBAN"
-  como urbano y "RURAL" como rural.
-
-### `def construir_naturaleza_ies(df) -> df:`
-
-- **`norm.str.startswith("NO OFICIAL")`** — máscara booleana que
-  identifica IES privadas (las categorías "NO OFICIAL - …" del
-  diccionario DataICFES).
-- **`mask1 | mask2`** — OR booleano vectorial entre dos máscaras.
-
-### `def _canonizar_departamento(valor) -> Optional[str]:`
-
-- **`return None`** — sale de la función con `None` (Python sin
-  retorno explícito devolvería también `None`).
-- Tres niveles de coincidencia: alias directo, igualdad con clave
-  canónica y coincidencia parcial (`startswith` o `in`).
-- **`for canon in DEPARTAMENTOS:`** — iterar un `dict` produce sus
-  claves en orden de inserción (Python 3.7+).
-
-### `def construir_departamento_y_distancia(df) -> df:`
-
-- **`canon.map({n: c for n, (c, _) in DEPARTAMENTOS.items()})`** —
-  combinación de `.map(...)` con comprensión de diccionario que
-  desempaqueta la tupla `(c, d)` y conserva sólo el código.
-- **`_` (guion bajo)** — convención: "valor que no me interesa".
-
-### `def construir_todas_las_variables(df) -> df:`
-
-- Aplica las 14 funciones en orden. Cada llamada modifica `df`
-  (renombrando, añadiendo columnas y eliminando fuentes), y se
-  reasigna a `df` para que la siguiente función opere sobre el estado
-  actualizado.
-
----
-
-## 6. Limpieza (Bloque 6)
-
-### `def limpiar(df) -> df:`
-
-- **`n_inicial = len(df)`** — guarda el tamaño original.
-- **`for col in MODULOS_GENERICOS + ["puntaje_saberpro_generico"]:`** —
-  el `+` concatena listas para iterar sobre la unión.
-- **`~df[col].between(0, 300)`** — **`~`** es NOT booleano vectorial;
-  la máscara identifica valores fuera del intervalo inclusivo.
+- **`~` (tilde)** — NOT vectorial.
+- **`.between(a, b)`** — máscara `True` si valor ∈ [a, b].
 - **`mask1 & mask2`** — AND vectorial.
-- **`df = df[df["X"].notna()].copy()`** — filtra filas. El método
-  `.notna()` devuelve una máscara booleana. `.copy()` evita avisos
-  `SettingWithCopyWarning` posteriores.
-- **`df.drop_duplicates(subset=["id_estudiante", "anio"], keep="first")`** —
-  elimina filas duplicadas según las columnas indicadas; conserva la
-  primera ocurrencia.
-- **`df.reset_index(drop=True)`** — reinicia el índice numérico tras el
-  filtrado. `drop=True` descarta el índice anterior.
+- **`.notna()`** — máscara de no-faltantes.
+- **`.copy()`** — evita avisos de vista (`SettingWithCopyWarning`).
+- **`drop_duplicates(subset=[...], keep="first")`** — elimina filas
+  duplicadas según las columnas indicadas, conservando la primera.
+- **`reset_index(drop=True)`** — reinicia el índice tras filtrar.
 
-### `def seleccionar_variables_finales(df) -> df:`
+### B.15 `pd.concat` y persistencia
 
-- **`df[VARIABLES_FINALES].copy()`** — selecciona y reordena columnas
-  en una sola operación; `.copy()` garantiza un objeto independiente.
+```python
+df = pd.concat(dfs.values(), axis=0, ignore_index=True)
+df.to_csv(ruta, index=False, encoding="utf-8-sig")
+```
 
----
+- **`pd.concat([...], axis=0)`** — apila verticalmente.
+- **`ignore_index=True`** — reindexa 0..n-1.
+- **`utf-8-sig`** — UTF-8 con BOM (compatible con Excel).
 
-## 7. Procesamiento y consolidación (Bloque 7)
+### B.16 CLI con `argparse`
 
-### `def procesar_anio(ruta_proyecto, anio) -> df:`
+```python
+parser.add_argument("--ruta", "-r", required=True, help=...)
+parser.add_argument("--anios", "-a", nargs="+", type=int, default=ANIOS)
+parser.add_argument("--sin-guardar", action="store_true")
+```
 
-- Estilo "pipeline": cada función recibe el resultado de la anterior.
-
-### `def consolidar(dfs: Dict[int, pd.DataFrame]) -> df:`
-
-- **`pd.concat([...], axis=0, ignore_index=True)`** — apila los
-  dataframes verticalmente y reindexa.
-- **`dfs.values()`** — vista de los `DataFrame` del diccionario, en
-  orden de inserción.
-
-### `def persistir(ruta_proyecto, dfs, df_consolidado) -> str:`
-
-- **`os.makedirs(salida, exist_ok=True)`** — crea recursivamente; con
-  `exist_ok=True` no falla si la carpeta ya existe.
-- **`df.to_csv(ruta, index=False, encoding="utf-8-sig")`** — exporta
-  CSV. `index=False` evita escribir la columna de índice;
-  `utf-8-sig` es UTF-8 con BOM (compatible con Excel).
+- **`--ruta`** / **`-r`** — nombre largo y alias corto.
+- **`required=True`** — obligatorio.
+- **`nargs="+"`** — uno o más valores.
+- **`type=int`** — convierte cada valor.
+- **`action="store_true"`** — flag booleano (`True` si está presente).
+- **`__name__ == "__main__"`** — punto de entrada CLI.
+- **`args = parser.parse_args()`** — devuelve un `Namespace` con los
+  atributos.
 
 ---
 
-## 8. Orquestador (Bloque 8)
+## Parte C — Módulo `analisis_descriptivo.py`
 
-### `def ejecutar_pipeline(ruta_proyecto, anios=ANIOS, persistir_disco=True) -> tuple:`
+### C.1 Importaciones específicas
 
-- **Parámetros con valores por defecto** — permite invocar la función
-  sin pasar `anios` ni `persistir_disco`.
-- **`Iterable[int]`** — el parámetro `anios` acepta cualquier objeto
-  recorrible: lista, tupla, generador, `range`.
-- **`raise FileNotFoundError(...)`** — lanza una excepción concreta.
-- **`for anio in anios: dfs[anio] = procesar_anio(...)`** — bucle que
-  va llenando el diccionario.
-- **Tupla de retorno** — `return dfs, df_consolidado` devuelve dos
-  valores empaquetados en una tupla.
+```python
+from scipy import stats
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from preparar_datos import MODULOS_GENERICOS, _registrar, ANIOS_PREVIO, ANIOS_IA
+```
+
+- **`from scipy import stats`** — accede a `stats.ttest_ind`,
+  `stats.mannwhitneyu`, `stats.chi2_contingency`, `stats.shapiro`,
+  `stats.kstest`.
+- **`matplotlib.use("Agg")`** — selecciona el backend "Agg" (sin GUI),
+  necesario en servidores o entornos sin pantalla.
+- **`import matplotlib.pyplot as plt`** — interfaz pyplot (estado
+  global, similar a MATLAB).
+- **`from preparar_datos import …`** — reutiliza constantes y el
+  logger del módulo 1.
+
+### C.2 Anotación de retorno con genéricos
+
+```python
+def ejecutar_analisis_descriptivo(ruta_proyecto: str) -> Dict[str, object]:
+```
+
+- **`Dict[str, object]`** — diccionario con claves `str` y valores de
+  cualquier tipo (`object` es la raíz de la jerarquía).
+
+### C.3 `_resumen_continua` — t de Welch + Mann-Whitney
+
+```python
+t, p_t = stats.ttest_ind(s0, s1, equal_var=False, nan_policy="omit")
+u, p_mw = stats.mannwhitneyu(s0, s1, alternative="two-sided")
+```
+
+- **`stats.ttest_ind(a, b, equal_var=False)`** — t de **Welch**
+  (no asume varianzas iguales). Retorna `(estadístico, p)`.
+- **`nan_policy="omit"`** — ignora `NaN`.
+- **`stats.mannwhitneyu(a, b, alternative="two-sided")`** — prueba no
+  paramétrica para dos muestras independientes. Bilateral.
+- **Desempaquetado `t, p_t = …`** — la función retorna una tupla con
+  nombre que se desempaqueta en dos variables.
+
+### C.4 `_resumen_dicotomica` — χ² con corrección de Yates
+
+```python
+tabla = pd.crosstab(
+    pd.concat([pd.Series(0, index=s0.index), pd.Series(1, index=s1.index)]),
+    pd.concat([s0, s1]),
+)
+chi2, p, *_ = stats.chi2_contingency(tabla, correction=True)
+```
+
+- **`pd.crosstab(fila, columna)`** — tabla de contingencia (frecuencias).
+- **`pd.Series(0, index=...)`** — Series rellena de ceros con un índice
+  dado.
+- **`pd.concat([…])`** — apila Series.
+- **`stats.chi2_contingency(tabla, correction=True)`** — χ² de Pearson;
+  `correction=True` aplica la corrección de Yates a tablas 2×2.
+- **`a, b, *_`** — desempaqueta los dos primeros valores; `*_` recoge
+  el resto en una lista anónima.
+
+### C.5 `tabla3_descriptivo` y `to_string`
+
+- **`for var in VARS_CONTINUAS:`** — bucle sobre la lista de variables
+  continuas.
+- **`if var not in df.columns: continue`** — defensivo: salta si la
+  variable no está en este dataframe.
+- **`filas.append({...})`** — diccionarios añadidos a una lista; al
+  final `pd.DataFrame(filas)` construye el dataframe.
+- **`.to_string(index=False)`** — convierte el dataframe a una cadena
+  formateada (útil para imprimir tablas en consola sin truncar).
+
+### C.6 `tabla_por_departamento` — `groupby` + `pivot_table`
+
+```python
+grupo = (df.groupby(["departamento", "departamento_nombre", "periodo_ia"])
+           [cols_valor].mean().round(2).reset_index())
+pivot = grupo.pivot_table(
+    index=["departamento", "departamento_nombre"],
+    columns="periodo_ia", values=cols_valor,
+)
+pivot.columns = [f"{var}__periodo_{p}" for var, p in pivot.columns]
+```
+
+- **`.groupby([cols])`** — agrupa por las columnas indicadas.
+- **`[cols_valor]`** — selecciona las columnas a agregar.
+- **`.mean()`** — agregación.
+- **`.round(2)`** — redondeo en todo el dataframe.
+- **`.reset_index()`** — vuelve el índice agrupado a columnas.
+- **`pivot_table(index=..., columns=..., values=...)`** — reordena en
+  formato ancho.
+- **`pivot.columns`** es un `MultiIndex` con tuplas `(variable, periodo)`;
+  la comprensión `[f"{var}__periodo_{p}" for var, p in pivot.columns]`
+  aplana esas tuplas en nombres simples.
+
+### C.7 Figuras matplotlib
+
+```python
+fig, ax = plt.subplots(figsize=(7, 5))
+ax.boxplot(datos, labels=[...])
+ax.set_ylabel("...")
+ax.set_title("...")
+ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+fig.tight_layout()
+fig.savefig(ruta_out, dpi=150, bbox_inches="tight")
+plt.close(fig)
+```
+
+- **`plt.subplots(figsize=(ancho, alto))`** — retorna una tupla
+  `(Figure, Axes)`. La figura es el lienzo; el axes es el gráfico.
+- **`ax.boxplot(lista_de_arrays, labels=[...])`** — boxplot por grupo.
+- **`ax.hist(array, bins=N, alpha=α, label=...)`** — histograma.
+- **`ax.scatter(x, y, s=tamaño, alpha=α)`** — dispersión.
+- **`ax.plot(x, y, linestyle="--", linewidth=1.2, label=...)`** —
+  línea.
+- **`ax.annotate(texto, (x, y), fontsize=…)`** — anotación.
+- **`ax.set_xlabel / set_ylabel / set_title / legend / grid`** —
+  configuración estética.
+- **`fig.tight_layout()`** — ajusta márgenes automáticamente.
+- **`fig.savefig(ruta, dpi=150, bbox_inches="tight")`** — guarda como
+  imagen.
+- **`plt.close(fig)`** — libera memoria; importante al generar muchas
+  figuras.
+
+### C.8 Línea de tendencia con `np.polyfit`
+
+```python
+coef = np.polyfit(x, y, deg=1)
+xs = np.linspace(x.min(), x.max(), 100)
+ax.plot(xs, np.polyval(coef, xs), ...)
+```
+
+- **`np.polyfit(x, y, deg=1)`** — ajuste polinómico por MCO; con
+  `deg=1` es una recta. Retorna `[pendiente, intercepto]`.
+- **`np.linspace(a, b, 100)`** — genera 100 puntos equiespaciados.
+- **`np.polyval(coef, xs)`** — evalúa el polinomio en `xs`.
 
 ---
 
-## 9. CLI (Bloque 9)
+## Parte D — Módulo `regresion_mco.py`
 
-### `def _construir_parser() -> argparse.ArgumentParser:`
+### D.1 Importaciones específicas de statsmodels
 
-- **`argparse.ArgumentParser(description=...)`** — crea el parser
-  principal.
-- **`parser.add_argument("--ruta", "-r", required=True, help=...)`** —
-  registra un argumento con su nombre largo, alias corto, obligación y
-  ayuda.
-- **`nargs="+"`** — acepta uno o más valores (`--anios 2021 2022 2023`).
-- **`type=int`** — convierte cada valor a entero al recibirlo.
-- **`default=ANIOS`** — valor por defecto si no se pasa el argumento.
-- **`action="store_true"`** — convierte el flag en booleano: `True` si
-  está presente, `False` si no.
-
-### Bloque `if __name__ == "__main__":`
-
-- **`__name__`** — variable especial: vale `"__main__"` cuando el
-  archivo se ejecuta directamente, y el nombre del módulo cuando se
-  importa. Permite que el código sólo corra cuando se invoca desde la
-  CLI.
-- **`args = _construir_parser().parse_args()`** — encadena: crea el
-  parser y parsea `sys.argv`. `args` es un `Namespace` con atributos
-  `args.ruta`, `args.anios`, `args.sin_guardar`.
-- **`not args.sin_guardar`** — invierte el flag: si el usuario pidió
-  *no* guardar, `persistir_disco = False`.
-- **Desempaquetado** — `dfs_anio, df_consolidado = ejecutar_pipeline(...)`
-  asigna cada elemento de la tupla retornada a una variable distinta.
-- **`df_consolidado.groupby("periodo_ia")["puntaje_saberpro_generico"].agg(["count","mean","std"]).round(2)`** —
-  cadena de métodos:
-  - `.groupby("col")` agrupa por una columna.
-  - `["columna"]` selecciona la columna numérica a resumir.
-  - `.agg([...])` aplica múltiples agregaciones.
-  - `.round(2)` redondea a dos decimales.
-
----
-
-## Apéndice A — Glosario de operadores y construcciones
-
-| Símbolo / construcción | Significado |
+| Import | Para qué se usa |
 |---|---|
-| `=` | Asignación. |
-| `==`, `!=` | Igualdad / desigualdad. |
-| `<`, `<=`, `>`, `>=` | Comparaciones. |
-| `and`, `or`, `not` | Booleanos escalares. |
-| `&`, `\|`, `~` | Booleanos vectoriales (numpy/pandas). |
-| `if … else …` | Expresión condicional ternaria. |
-| `for … in …` | Bucle iterativo. |
-| `lambda x: …` | Función anónima. |
-| `def f(...): ...` | Definición de función. |
-| `return` | Devuelve un valor. |
-| `raise` | Lanza una excepción. |
-| `try / except` | Maneja excepciones. |
-| `continue` | Salta a la siguiente iteración. |
-| `from … import …` | Importa nombres específicos. |
-| `f"…"` | Cadena formateada. |
-| `r"…"` | Raw string (no interpreta `\n` etc.). |
-| `[a, b]` | Literal de lista. |
-| `(a, b)` | Literal de tupla. |
-| `{k: v}` | Literal de diccionario. |
-| `[x for x in y]` | Comprensión de lista. |
-| `{k: v for k, v in z}` | Comprensión de diccionario. |
-| `_` | Identificador convencional "irrelevante". |
-| `__name__` | Variable especial del intérprete. |
+| `import statsmodels.api as sm` | `sm.add_constant`, tipos base. |
+| `import statsmodels.formula.api as smf` | `smf.ols(formula, data=df).fit(...)`. |
+| `from statsmodels.stats.diagnostic import het_breuschpagan, linear_reset` | BP y RESET de Ramsey. |
+| `from statsmodels.stats.outliers_influence import variance_inflation_factor` | VIF por variable. |
+| `from statsmodels.stats.stattools import durbin_watson` | DW. |
+| `from statsmodels.stats.multitest import multipletests` | Holm, Benjamini-Hochberg, Bonferroni. |
+| `from scipy import stats` | Shapiro-Wilk, Kolmogorov-Smirnov. |
+
+### D.2 Constantes
+
+```python
+DEPENDIENTES = ["puntaje_saberpro_generico", *MODULOS_GENERICOS]
+CONTROLES = ["estrato", "genero", "edad", ...]
+ESPECIFICACIONES = ("base", "ef_ies", "ef_mun")
+ALPHA = 0.05
+```
+
+- **`[*lista]`** — desempaqueta una lista dentro de otra.
+- **`("a", "b", "c")`** — tupla (más adecuada para constantes que no
+  cambian).
+
+### D.3 `cargar_y_preparar` — listwise y casting
+
+```python
+df = df.dropna(subset=columnas_modelo).copy()
+for col in ["departamento", "tipo_municipio", "cod_ies", "periodo_ia"]:
+    df[col] = df[col].astype("int64")
+```
+
+- **`df.dropna(subset=cols)`** — elimina filas con `NaN` en las
+  columnas indicadas (**listwise deletion**, el criterio estándar
+  para MCO).
+- **`.astype("int64")`** — entero **no nullable**. Necesario porque
+  `smf.ols` con `C(...)` no acepta `Int64` (nullable).
+
+### D.4 Fórmulas patsy
+
+```python
+return (
+    f"{dependiente} ~ periodo_ia "
+    f"+ C(departamento, Treatment(reference=0)) "
+    f"+ distancia_bogota_km + {controles_str}"
+)
+```
+
+- **Fórmula tipo R** — `Y ~ X1 + X2 + ...`.
+- **`C(col)`** — declara la columna como categórica; patsy genera las
+  dummies automáticamente.
+- **`Treatment(reference=0)`** — fija el nivel `0` como categoría de
+  referencia (Bogotá en `departamento`, Bogotá en `tipo_municipio`).
+- **`f"…{var}…"`** — interpolación para inyectar variables al texto.
+
+### D.5 Ajuste con errores clusterizados
+
+```python
+modelo = smf.ols(formula, data=df).fit(
+    cov_type="cluster",
+    cov_kwds={"groups": df["cod_ies"].values},
+)
+```
+
+- **`smf.ols(formula, data=df)`** — crea el modelo (no ajusta aún).
+- **`.fit(...)`** — estima los coeficientes.
+- **`cov_type="cluster"`** — matriz de covarianza clusterizada
+  (robusta a heterocedasticidad y a correlación dentro de cluster).
+- **`cov_kwds={"groups": array}`** — identificador del cluster (IES).
+- **`with warnings.catch_warnings(): warnings.simplefilter("ignore")`** —
+  suprime los avisos benignos de statsmodels.
+
+### D.6 Diagnósticos
+
+```python
+# Normalidad
+n = len(residuos)
+if n < 5000:
+    st, p = stats.shapiro(residuos)         # Shapiro-Wilk
+else:
+    residuos_z = (residuos - residuos.mean()) / residuos.std(ddof=1)
+    st, p = stats.kstest(residuos_z, "norm") # KS contra N(0,1)
+```
+
+- **`stats.shapiro(arr)`** — prueba de Shapiro-Wilk. Recomendada para
+  n < 5 000 por motivos de potencia.
+- **`stats.kstest(arr_z, "norm")`** — Kolmogorov-Smirnov contra una
+  distribución de referencia (aquí la normal estándar).
+
+```python
+# Breusch-Pagan
+bp_lm, bp_p, *_ = het_breuschpagan(res, modelo.model.exog)
+```
+
+- **`het_breuschpagan(residuos, X)`** — retorna varios valores; sólo
+  guardamos el estadístico LM y el p-valor.
+
+```python
+dw = durbin_watson(res)               # Durbin-Watson
+reset = linear_reset(modelo, power=2, use_f=True)
+```
+
+- **`durbin_watson(residuos)`** — entre 0 y 4; ~2 = no autocorrelación.
+- **`linear_reset(modelo, power=2, use_f=True)`** — RESET de Ramsey.
+  Añade potencias de los valores ajustados; prueba si esos términos
+  son significativos.
+
+```python
+# VIF
+X = sm.add_constant(df[cols].astype(float).values)
+vifs = [variance_inflation_factor(X, i + 1) for i in range(len(cols))]
+```
+
+- **`sm.add_constant(X)`** — añade columna de unos para el intercepto.
+- **`variance_inflation_factor(X, i)`** — VIF de la columna `i`.
+- **Comprensión de lista** — calcula el VIF de cada variable.
+
+### D.7 Triángulo de colinealidad
+
+Tres modelos OLS independientes que difieren en qué variables
+geográficas incluyen. La misma técnica que en `estimar_modelo`,
+recolectando `params["periodo_ia"]`, `bse["periodo_ia"]` y
+`pvalues["periodo_ia"]`.
+
+### D.8 Tabla 4
+
+```python
+tabla = pd.DataFrame({
+    "termino":   coef.index,
+    "coef":      coef.values.round(4),
+    "estadistico_t": (coef.values / se.values).round(3),
+    "p_valor":   pvals.values.round(5),
+})
+```
+
+- **`modelo.params`** / **`modelo.bse`** / **`modelo.pvalues`** —
+  `Series` con coeficientes, errores estándar y p-valores indexados
+  por nombre de variable.
+- **`.values`** — array de numpy subyacente.
+- **`.round(n)`** — redondeo.
+
+### D.9 Corrección por pruebas múltiples
+
+```python
+_, p_holm, _, _ = multipletests(sub["p_IA"].values, alpha=ALPHA, method="holm")
+_, p_bh,   _, _ = multipletests(sub["p_IA"].values, alpha=ALPHA, method="fdr_bh")
+```
+
+- **`multipletests(pvals, alpha, method)`** — retorna 4 elementos:
+  - rechazos (booleano),
+  - p-valores ajustados,
+  - alfa corregido por Sidak,
+  - alfa corregido por Bonferroni.
+- **`_, x, _, _`** — desempaquetado: solo nos interesa el segundo
+  (los p-valores ajustados).
+- **`method="holm"`** — controla la **FWER** (probabilidad de un solo
+  falso positivo).
+- **`method="fdr_bh"`** — Benjamini-Hochberg; controla la **FDR**
+  (proporción esperada de falsos positivos entre los rechazos).
+
+### D.10 Comparaciones booleanas a la salida
+
+```python
+sub["sig_5pct_holm"] = sub["p_IA_holm"] < ALPHA
+```
+
+- Genera una columna booleana vectorial: `True` si el p ajustado es
+  inferior al umbral.
 
 ---
 
-## Apéndice B — Tabla resumen de funciones definidas
+## Parte E — Módulo `main.py`
 
-| Función | Entradas | Retorno | Propósito |
-|---|---|---|---|
-| `_normalizar_texto` | `object` | `str` | Mayúsculas, sin tildes, espacios simples. |
-| `_registrar` | `str` | `None` | Log con timestamp. |
-| `_a_numerico` | `Series` | `Series` | Convierte a número tolerando coma. |
-| `montar_drive_si_aplica` | `str` | `bool` | Monta Drive si se está en Colab. |
-| `_detectar_formato` | `str` | `(str, str)` | Detecta separador y encoding. |
-| `_leer_columnas_disponibles` | `str, str, str` | `list[str]` | Devuelve nombres de columnas del archivo. |
-| `leer_archivo_anio` | `str, int` | `DataFrame` | Carga sólo las 17 columnas requeridas. |
-| `transformar_id_y_modulos` | `DataFrame` | `DataFrame` | Rename de ID y módulos. |
-| `construir_periodo_ia` | `DataFrame` | `DataFrame` | Dummy 0/1 por cohorte. |
-| `construir_puntaje_generico` | `DataFrame` | `DataFrame` | Promedio de los 5 módulos. |
-| `construir_edad` | `DataFrame` | `DataFrame` | Calcula edad y elimina fecha. |
-| `construir_genero` | `DataFrame` | `DataFrame` | F=0/M=1, elimina fuente. |
-| `construir_estrato` | `DataFrame` | `DataFrame` | Escala 1-6, elimina fuente. |
-| `construir_nivel_educ_padre` | `DataFrame` | `DataFrame` | Ordinal 1-7, elimina fuente. |
-| `construir_estu_trabaja` | `DataFrame` | `DataFrame` | Dummy, elimina fuente. |
-| `construir_cabeza_familia` | `DataFrame` | `DataFrame` | Proxy, elimina fuente. |
-| `construir_jornada` | `DataFrame` | `DataFrame` | Aproximada con metodología. |
-| `construir_internet` | `DataFrame` | `DataFrame` | Dummy, elimina fuente. |
-| `construir_area_residencia` | `DataFrame` | `DataFrame` | Urbano=1, elimina fuente. |
-| `construir_naturaleza_ies` | `DataFrame` | `DataFrame` | Privada=1, elimina fuente. |
-| `_canonizar_departamento` | `object` | `Optional[str]` | Nombre canónico. |
-| `construir_departamento_y_distancia` | `DataFrame` | `DataFrame` | Código 0-32 + km. |
-| `construir_todas_las_variables` | `DataFrame` | `DataFrame` | Orquesta las 14 construcciones. |
-| `limpiar` | `DataFrame` | `DataFrame` | Rangos, filtros, duplicados. |
-| `seleccionar_variables_finales` | `DataFrame` | `DataFrame` | Reordena a las 22 finales. |
-| `procesar_anio` | `str, int` | `DataFrame` | Pipeline para un año. |
-| `consolidar` | `Dict[int, DataFrame]` | `DataFrame` | Concatena los anuales. |
-| `persistir` | `str, dict, DataFrame` | `str` | Escribe CSV en disco. |
-| `ejecutar_pipeline` | `str, Iterable[int], bool` | `(dict, DataFrame)` | Punto de entrada. |
-| `_construir_parser` | — | `ArgumentParser` | Define la CLI con `argparse`. |
+### E.1 Orquestación
+
+```python
+def ejecutar_todo(ruta_proyecto, anios=ANIOS,
+                  correr_preparar=True, correr_descriptivo=True,
+                  correr_regresion=True) -> None:
+    if correr_preparar:
+        ejecutar_pipeline(...)
+    if correr_descriptivo:
+        ejecutar_analisis_descriptivo(...)
+    if correr_regresion:
+        ejecutar_regresion(...)
+```
+
+- **Parámetros con valores por defecto** — permiten invocar la función
+  sin argumentos.
+- **`-> None`** — no retorna; sólo produce efectos secundarios
+  (archivos).
+
+### E.2 CLI con elección selectiva
+
+```python
+parser.add_argument("--solo", choices=["preparar", "descriptivo", "regresion"], default=None)
+parser.add_argument("--saltar-preparar", action="store_true")
+```
+
+- **`choices=[...]`** — restringe los valores permitidos. Si el usuario
+  pasa otra cosa, `argparse` aborta con un mensaje claro.
+- **`default=None`** — si no se pasa `--solo`, se ejecutan los tres.
+
+```python
+if args.solo == "preparar":
+    correr_desc = correr_reg = False
+elif args.solo == "descriptivo":
+    correr_prep = correr_reg = False
+elif args.solo == "regresion":
+    correr_prep = correr_desc = False
+if args.saltar_preparar:
+    correr_prep = False
+```
+
+- **Asignación múltiple `a = b = False`** — asigna `False` a ambas
+  variables.
+- **Cascada `if / elif`** — sólo una rama se ejecuta.
+
+---
+
+## Apéndice — Tabla resumen de TODAS las funciones del proyecto
+
+### `preparar_datos.py`
+
+| Función | Retorno | Propósito |
+|---|---|---|
+| `_normalizar_texto` | `str` | Mayúsculas sin tildes. |
+| `_registrar` | `None` | Log con timestamp. |
+| `_a_numerico` | `Series` | Conversión numérica defensiva. |
+| `montar_drive_si_aplica` | `bool` | Monta Drive si está en Colab. |
+| `_detectar_formato` | `(str, str)` | Detecta separador + encoding. |
+| `_leer_columnas_disponibles` | `list[str]` | Nombres de columnas del .txt. |
+| `leer_archivo_anio` | `DataFrame` | Carga sólo las 19 columnas requeridas. |
+| `transformar_id_y_modulos` | `DataFrame` | Rename de ID y módulos. |
+| `construir_periodo_ia` … `construir_tipo_municipio` | `DataFrame` | 14 funciones, una por variable. |
+| `construir_todas_las_variables` | `DataFrame` | Orquesta las 14. |
+| `limpiar` | `DataFrame` | Rangos, faltantes, duplicados. |
+| `seleccionar_variables_finales` | `DataFrame` | 25 columnas finales. |
+| `procesar_anio` | `DataFrame` | Pipeline para un año. |
+| `consolidar` | `DataFrame` | Apila los 4 años. |
+| `persistir` | `str` | Escribe CSV en disco. |
+| `ejecutar_pipeline` | `(dict, DataFrame)` | Punto de entrada. |
+
+### `analisis_descriptivo.py`
+
+| Función | Retorno | Propósito |
+|---|---|---|
+| `cargar_consolidado` | `DataFrame` | Lee `df_consolidado.csv`. |
+| `_fmt_p` | `str` | Formatea p-valores. |
+| `_resumen_continua` | `dict` | t-Welch + Mann-Whitney. |
+| `_resumen_dicotomica` | `dict` | χ² con Yates. |
+| `tabla3_descriptivo` | `DataFrame` | Tabla 3 completa. |
+| `tabla_por_departamento` | `DataFrame` | Medias por (dpto × cohorte). |
+| `figura_boxplot_periodo` | `None` | Boxplot por cohorte. |
+| `figura_boxplot_departamento` | `None` | Boxplot por dpto. |
+| `figura_histograma_cohortes` | `None` | Histograma comparativo. |
+| `figura_dispersion_distancia` | `None` | Scatter dist↔puntaje. |
+| `ejecutar_analisis_descriptivo` | `dict` | Punto de entrada. |
+
+### `regresion_mco.py`
+
+| Función | Retorno | Propósito |
+|---|---|---|
+| `cargar_y_preparar` | `DataFrame` | Listwise + casting. |
+| `_formula` | `str` | Fórmula patsy según especificación. |
+| `estimar_modelo` | `RegressionResults` | OLS con cluster por IES. |
+| `_normalidad` | `(str, float, float)` | Shapiro o KS según n. |
+| `_vif_variables_continuas` | `DataFrame` | VIF por variable. |
+| `diagnosticos` | `dict` | Las 5 pruebas + R². |
+| `colinealidad_geografica` | `DataFrame` | Versiones (a)/(b)/(c). |
+| `tabla4_un_modelo` | `DataFrame` | Coeficientes + SE + p. |
+| `estimar_18_modelos` | `(DataFrame, DataFrame, DataFrame)` | Loop por (dep × spec). |
+| `aplicar_correcciones` | `DataFrame` | Holm + BH. |
+| `ejecutar_regresion` | `dict` | Punto de entrada. |
+
+### `main.py`
+
+| Función | Retorno | Propósito |
+|---|---|---|
+| `ejecutar_todo` | `None` | Encadena los tres módulos. |
+| `_parser` | `ArgumentParser` | CLI con `--solo`, `--saltar-preparar`. |

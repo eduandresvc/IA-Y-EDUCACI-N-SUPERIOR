@@ -108,8 +108,10 @@ COLS_REQUERIDAS: List[str] = [
     # — Académicas / institucionales —
     "estu_metodo_prgm",
     "inst_origen",
+    "inst_cod_institucion",     # identificador único de IES (EF en regresión)
     # — Geografía institucional —
     "estu_inst_departamento",
+    "estu_inst_municipio",      # municipio de la IES (EF tipo_municipio)
 ]
 
 # -----------------------------------------------------------------------------
@@ -150,6 +152,47 @@ DEPARTAMENTOS: Dict[str, Tuple[int, float]] = {
     "VALLE":              (30,  460.0),
     "VAUPES":             (31,  870.0),
     "VICHADA":            (32,  760.0),
+}
+
+# -----------------------------------------------------------------------------
+# 1.2.bis  Capitales departamentales (clasificación 'tipo_municipio').
+#          Sirven para identificar si el municipio de la IES es la capital
+#          de su departamento (Tabla 1 del documento).
+# -----------------------------------------------------------------------------
+CAPITALES: Dict[str, str] = {
+    "BOGOTA":             "BOGOTA D.C.",
+    "AMAZONAS":           "LETICIA",
+    "ANTIOQUIA":          "MEDELLIN",
+    "ARAUCA":             "ARAUCA",
+    "ATLANTICO":          "BARRANQUILLA",
+    "BOLIVAR":            "CARTAGENA",
+    "BOYACA":             "TUNJA",
+    "CALDAS":             "MANIZALES",
+    "CAQUETA":            "FLORENCIA",
+    "CASANARE":           "YOPAL",
+    "CAUCA":              "POPAYAN",
+    "CESAR":              "VALLEDUPAR",
+    "CHOCO":              "QUIBDO",
+    "CORDOBA":            "MONTERIA",
+    "CUNDINAMARCA":       "BOGOTA D.C.",
+    "GUAINIA":            "INIRIDA",
+    "GUAVIARE":           "SAN JOSE DEL GUAVIARE",
+    "HUILA":              "NEIVA",
+    "LA GUAJIRA":         "RIOHACHA",
+    "MAGDALENA":          "SANTA MARTA",
+    "META":               "VILLAVICENCIO",
+    "NARINO":             "PASTO",
+    "NORTE DE SANTANDER": "CUCUTA",
+    "PUTUMAYO":           "MOCOA",
+    "QUINDIO":            "ARMENIA",
+    "RISARALDA":          "PEREIRA",
+    "SAN ANDRES":         "SAN ANDRES",
+    "SANTANDER":          "BUCARAMANGA",
+    "SUCRE":              "SINCELEJO",
+    "TOLIMA":             "IBAGUE",
+    "VALLE":              "CALI",
+    "VAUPES":             "MITU",
+    "VICHADA":            "PUERTO CARRENO",
 }
 
 # Variantes/aliases que aparecen en DataICFES (con tildes o nombres largos).
@@ -194,6 +237,10 @@ VARIABLES_MODELO: List[str] = [
     "internet", "area_residencia", "naturaleza_ies",
     # Geográficas
     "departamento", "departamento_nombre", "distancia_bogota_km",
+    # Identificadores auxiliares para efectos fijos (§8.9 del documento)
+    "cod_ies",            # EF por institución
+    "municipio_ies",      # EF por municipio
+    "tipo_municipio",     # EF por tipo de municipio (0=Bogotá, 1=capital, 2=resto)
 ]
 
 # Unión ordenada que conserva el dataframe final.
@@ -515,8 +562,40 @@ def construir_departamento_y_distancia(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def construir_identificadores_fe(df: pd.DataFrame) -> pd.DataFrame:
+    """Renombra cod_ies y municipio_ies (sin transformación adicional)."""
+    df = df.rename(columns={
+        "inst_cod_institucion": "cod_ies",
+        "estu_inst_municipio":  "municipio_ies",
+    })
+    df["cod_ies"] = pd.to_numeric(df["cod_ies"], errors="coerce").astype("Int64")
+    return df
+
+
+def construir_tipo_municipio(df: pd.DataFrame) -> pd.DataFrame:
+    """tipo_municipio: 0 = Bogotá, 1 = capital de otro dpto, 2 = resto.
+
+    Usa el municipio normalizado de la IES y la tabla CAPITALES para
+    decidir, sin eliminar municipio_ies (que se conserva para EF).
+    """
+    mun_norm = df["municipio_ies"].apply(_normalizar_texto)
+    # Capital esperada de cada departamento (también normalizada).
+    capital_esperada = df["departamento_nombre"].map(
+        {n: _normalizar_texto(c) for n, c in CAPITALES.items()}
+    )
+    es_bogota = df["departamento_nombre"].eq("BOGOTA")
+    es_capital_otro = (~es_bogota) & (mun_norm == capital_esperada)
+    df["tipo_municipio"] = np.where(
+        es_bogota, 0,
+        np.where(es_capital_otro, 1, 2),
+    )
+    df["tipo_municipio"] = pd.array(df["tipo_municipio"], dtype="Int64")
+    return df
+
+
 def construir_todas_las_variables(df: pd.DataFrame) -> pd.DataFrame:
-    """Aplica en orden las 14 transformaciones; cada una elimina su fuente."""
+    """Aplica en orden las 16 transformaciones; cada una elimina su fuente
+    cuando ya no se necesita."""
     df = transformar_id_y_modulos(df)
     df = construir_periodo_ia(df)
     df = construir_puntaje_generico(df)
@@ -531,6 +610,8 @@ def construir_todas_las_variables(df: pd.DataFrame) -> pd.DataFrame:
     df = construir_area_residencia(df)      # drop estu_areareside
     df = construir_naturaleza_ies(df)       # drop inst_origen
     df = construir_departamento_y_distancia(df)  # drop estu_inst_departamento
+    df = construir_identificadores_fe(df)   # rename cod_ies, municipio_ies
+    df = construir_tipo_municipio(df)       # crea tipo_municipio (mantiene municipio_ies)
     return df
 
 
