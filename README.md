@@ -19,6 +19,23 @@ con Bogotá como categoría de referencia en el modelo.
 
 ---
 
+## 📘 Libro didáctico — `libro/`
+
+Para quien quiera entender **palabra por palabra** cada archivo del
+proyecto (los `.py` y los `.ipynb`), abre [`libro/README.md`](./libro/README.md).
+Está organizado en ocho capítulos:
+
+1. Python básico (palabras reservadas, operadores, sintaxis).
+2. Librerías clave (`pandas`, `numpy`, `scipy`, `statsmodels`, …).
+3. `preparar_datos.py` — preparación de microdatos.
+4. `analisis_descriptivo.py` — análisis bivariado.
+5. `regresion_mco.py` — 18 modelos MCO + diagnósticos.
+6. `main.py` — orquestador.
+7. Notebooks Colab (`colab_01`, `colab_02`, `colab_03`).
+8. Glosario alfabético.
+
+---
+
 ## Estructura del proyecto
 
 ```
